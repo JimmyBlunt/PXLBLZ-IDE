@@ -666,37 +666,31 @@ it('shares a duplicated Clip runtime, then makes the copy independent before edi
     }
 
     expect(await editor.tool('read_show', { binding_id: editor.binding_id })).toMatchObject({ code: 'read', show: raised })
-    const independent = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Fork copied Pattern', idempotency_key: 'begin-independent' })
+    const independent = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Fork copied Pattern and raise its gain', idempotency_key: 'begin-independent' })
     const independentId = { binding_id: editor.binding_id, operation_id: independent.operation_id as string }
     expect((await editor.tool('make_clip_pattern_independent', { ...independentId, idempotency_key: 'independent', clip_id: copyId })).code).toBe('changed')
+    expect((await editor.tool('update_clips', { ...independentId, idempotency_key: 'copy-control', updates: [{ clip_id: copyId, instance_properties: { controls: { sliderGain: 0.75 } } }] })).code).toBe('changed')
+    expect(editor.current()).toEqual(raised)
+    expect(editor.readSaved()).toEqual(raised)
+    expect(editor.history().past).toEqual([original, replaced, shared])
+    expect(editor.write).toHaveBeenCalledTimes(3)
     expect((await editor.tool('commit_edit', { ...independentId, idempotency_key: 'commit-independent' })).code).toBe('outcome')
     await vi.waitFor(async () => expect(await editor.tool('get_outcome', independentId)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
-    const forked = structuredClone(editor.current())
-    const copyInstanceId = forked.composition.clips.find(clip => clip.id === copyId)!.instanceId
-    expect(copyInstanceId).not.toBe(forked.composition.clips[0].instanceId)
-    expect(forked.composition.patternInstances).toHaveLength(2)
-    expect(forked.composition.patternInstances[0]).toEqual(raised.composition.patternInstances[0])
-    expect(forked.composition.patternInstances[1]).toEqual({ ...raised.composition.patternInstances[0], id: copyInstanceId })
-    expect(editor.readSaved()).toEqual(forked)
-    expect(editor.history().past).toEqual([original, replaced, shared, raised])
-    expect(editor.write).toHaveBeenCalledTimes(4)
-
-    expect(await editor.tool('read_show', { binding_id: editor.binding_id })).toMatchObject({ code: 'read', show: forked })
-    const final = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Raise copied gain only', idempotency_key: 'begin-copy-control' })
-    const finalId = { binding_id: editor.binding_id, operation_id: final.operation_id as string }
-    expect((await editor.tool('update_clips', { ...finalId, idempotency_key: 'copy-control', updates: [{ clip_id: copyId, instance_properties: { controls: { sliderGain: 0.75 } } }] })).code).toBe('changed')
-    expect((await editor.tool('commit_edit', { ...finalId, idempotency_key: 'commit-copy-control' })).code).toBe('outcome')
-    await vi.waitFor(async () => expect(await editor.tool('get_outcome', finalId)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
     const finalRecord = structuredClone(editor.current())
-    const expectedFinal = structuredClone(forked)
+    const copyInstanceId = finalRecord.composition.clips.find(clip => clip.id === copyId)!.instanceId
+    expect(copyInstanceId).not.toBe(raised.composition.clips[0].instanceId)
+    const expectedFinal = structuredClone(raised)
     expectedFinal.updatedAt = finalRecord.updatedAt
-    expectedFinal.composition.patternInstances[1].controlTargets = { sliderGain: 0.75 }
+    expectedFinal.composition.clips.find(clip => clip.id === copyId)!.instanceId = copyInstanceId
+    expectedFinal.composition.patternInstances.push({ ...raised.composition.patternInstances[0], id: copyInstanceId, controlTargets: { sliderGain: 0.75 } })
     expect(finalRecord).toEqual(expectedFinal)
-    expect(finalRecord.composition.patternInstances[0].controlTargets).toEqual({ sliderGain: 0.5 })
+    expect(finalRecord.composition.clips[0]).toEqual(raised.composition.clips[0])
+    expect(finalRecord.composition.patternInstances[0]).toEqual(raised.composition.patternInstances[0])
+    expect(finalRecord.composition.patternInstances).toHaveLength(2)
     expect(finalRecord.composition.patternInstances.map(instance => instance.pattern)).toEqual([{ kind: 'user', id: 'mcp-gain' }, { kind: 'user', id: 'mcp-gain' }])
     expect(editor.readSaved()).toEqual(finalRecord)
-    expect(editor.history().past).toEqual([original, replaced, shared, raised, forked])
-    expect(editor.write).toHaveBeenCalledTimes(5)
+    expect(editor.history().past).toEqual([original, replaced, shared, raised])
+    expect(editor.write).toHaveBeenCalledTimes(4)
     const native = await nativeShowV2Artifacts(editor.readSaved(), editor.dependencies)
     const bundle = buildShowFileBundle(editor.readSaved(), { patterns: editor.dependencies.patterns, maps: [], libraries: [] }, { appVersion: 'mcp-v2', exportedAt: '2026-01-01T00:00:00.000Z' })
     expect((await parseShowFileBundle(await serializeShowFileBundle(bundle.bundle), { acceptV2: true })).show).toEqual(finalRecord)
@@ -709,7 +703,7 @@ it('shares a duplicated Clip runtime, then makes the copy independent before edi
   } finally { editor.close() }
 }, 120_000)
 
-it('moves a Group occurrence after replacement across a Layout switch without resetting shared time', async () => {
+it('moves a Group occurrence before its authored restart and preserves exported elapsed across a Layout switch', async () => {
   const startedAt = performance.now()
   const fixture = showV2LayoutEditorFixture()
   const editor = await boundEditor({ patterns: fixture.dependencies.patterns })
@@ -734,14 +728,14 @@ it('moves a Group occurrence after replacement across a Layout switch without re
     expect(occurrence.startMs).toBe(2_000)
     const second = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Move held Group', idempotency_key: 'begin-move-group' })
     const secondId = { binding_id: editor.binding_id, operation_id: second.operation_id as string }
-    const move = await editor.tool('move_group_occurrence', { ...secondId, idempotency_key: 'move-group', group_occurrence_id: occurrence.id, start_ms: 3_000 })
+    const move = await editor.tool('move_group_occurrence', { ...secondId, idempotency_key: 'move-group', group_occurrence_id: occurrence.id, start_ms: 2_500 })
     expect(move.code).toBe('changed')
     expect((await editor.tool('commit_edit', { ...secondId, idempotency_key: 'commit-move-group' })).code).toBe('outcome')
     await vi.waitFor(async () => expect(await editor.tool('get_outcome', secondId)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
     const moved = structuredClone(editor.current())
     const expectedMoved = structuredClone(replaced)
     expectedMoved.updatedAt = moved.updatedAt
-    expectedMoved.composition.groupOccurrences[0].startMs = 3_000
+    expectedMoved.composition.groupOccurrences[0].startMs = 2_500
     expect(moved).toEqual(expectedMoved)
     expect(moved.composition.groupDefinitions).toEqual(replaced.composition.groupDefinitions)
     expect(moved.composition.groupOccurrences[0].layerBindings).toEqual(occurrence.layerBindings)
@@ -758,8 +752,8 @@ it('moves a Group occurrence after replacement across a Layout switch without re
     expect(authored).toHaveLength(1)
     const replay = native.replay('fast')
     const elapsed = (atMs: number) => exportedScalar(replay.advanceTo(atMs, { stepMs: 250, forceFullIntermediateRender: true }).exports, `${authored[0].prefix}_elapsed`, 'fast')
-    const atSixSeconds = elapsed(6_000)
-    expect(elapsed(6_250) - atSixSeconds).toBe(250)
+    const beforeSwitch = elapsed(4_750)
+    expect(elapsed(5_250) - beforeSwitch).toBe(500)
     console.info(`MCP history Group Layout: ${Math.round(performance.now() - startedAt)} ms`)
   } finally { editor.close() }
 }, 120_000)

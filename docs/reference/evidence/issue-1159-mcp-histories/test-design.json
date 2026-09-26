@@ -13,15 +13,15 @@
   "sequences": [
     "set_show_end -> replace_show -> rename_show -> commit_edit.",
     "replace_show -> commit_edit -> read_show -> update_clips -> commit_edit -> Undo -> Redo.",
-    "replace_show -> duplicate_clip -> update_clips shared control -> make_clip_pattern_independent -> update_clips copied control, with one commit per operation.",
-    "replace_show -> move_group_occurrence across a Layout switch -> commit_edit.",
+    "replace_show -> commit_edit -> duplicate_clip -> commit_edit -> update_clips shared control -> commit_edit -> make_clip_pattern_independent -> update_clips copied control -> commit_edit; the last two commands share one private operation.",
+    "replace_show -> commit_edit -> move_group_occurrence from 2000 to 2500 -> commit_edit -> sample exported elapsed at 4750 and 5250 across the 5000 Layout switch.",
     "replace_show valid -> invalid -> identical retry -> corrected -> commit or cancel; private replacement -> manual edit -> stale commit.",
     "Identical keyed replacement and commit retry; failed save and failed pending save superseded by a queued manual update."
   ],
   "oracles": [
     "Exact complete live and provider records, independently authored expected fields, full history snapshots, write counts, and MCP receipts.",
     "Serialized .pxlshow parsed through its importer and native .epe replay samples with independently specified red channel values.",
-    "Group definitions, bindings, instance identity, Layout span and Fast elapsed continuity after the switch are structural and runtime oracles; no independent RGB claim for that fixture.",
+    "Group definitions, bindings, instance identity, Layout spans, and Fast elapsed continuity across the switch after the authored restart are structural and runtime oracles; no independent RGB claim for that fixture.",
     "Fault controls invert stale admission and duplicate write expectations separately, and each named test must fail before restoration."
   ],
   "residualGaps": [
