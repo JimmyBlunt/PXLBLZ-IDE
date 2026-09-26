@@ -1,0 +1,30 @@
+{
+  "invariants": [
+    "External MCP binding identifies the ordinary mounted Show and visible connected drawer.",
+    "An accepted whole-Show replacement preserves the existing id and name, saves the complete authored composition, and creates one Undo entry.",
+    "Fixed-time Stage captures at declared 32x32 grid centres equal literal opaque primary RGBA values.",
+    "An active dirty duration keeps the replacement waiting; a manual commit supersedes it without partial candidate adoption."
+  ],
+  "partitions": [
+    "Single-Zone solid red and two-Zone left/right routing with a 500 ms swap.",
+    "Virtual times 250 ms and 750 ms on either side of the authored cut.",
+    "Current, Undo, Redo, and reload publication states.",
+    "Idle editor input and focused dirty duration input."
+  ],
+  "sequences": [
+    "Seed personal Show and Patterns, arm visible drawer, register/authorize external client, bind, read, begin, replace, commit, then read saved outcome.",
+    "Capture solid, replace with swapped two-Zone Show, capture both times, Undo, Redo, reload, and recapture.",
+    "Begin private colour change, dirty duration without blur, commit to waiting, press Enter, then inspect revision-conflict and durable manual state."
+  ],
+  "oracles": [
+    "Real OAuth/MCP structuredContent, visible drawer identity, complete D1 record comparison, selected rail row, and ordinary Undo/Redo controls.",
+    "Retained PNG bytes from real canvas toBlob, decoded image dimensions, SHA-256, exact samplesAt RGBA, and changedPixelsBetween unchanged-state measurement.",
+    "The prior solid-red PNG fails the two-Zone right-hand oracle; a fresh two-Zone PNG passes it.",
+    "Manifest asserts every capture exists, has expected byte count, and records browser errors as empty."
+  ],
+  "residualGaps": [
+    "Fast 2D plane rendering with full primary colours only; no aesthetic baseline, hardware behaviour, Precise fidelity, or arbitrary effects claim.",
+    "This evidence checks an active-input release and conflict; it does not wait for the real five-second interaction deadline.",
+    "The stale-PNG challenge qualifies the image-boundary oracle, not a product renderer mutation."
+  ]
+}

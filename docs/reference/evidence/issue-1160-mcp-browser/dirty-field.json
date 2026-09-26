@@ -1,0 +1,157 @@
+{
+  "issue": 1160,
+  "sourceBaseCommit": "c4433f5a",
+  "test": "dirty-field",
+  "workerIndex": 0,
+  "workers": 1,
+  "syntheticAccountConsumption": "one account per test",
+  "show": {
+    "id": "agent-mcp-1160-dirty",
+    "name": "MCP dirty field browser proof"
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "map": "plane",
+  "referencePixelCount": 1024,
+  "previewSettings": {
+    "isRunning": false,
+    "fidelity": "fast",
+    "speed": 1,
+    "brightness": 1,
+    "lightSize": 0.5,
+    "diffusion": 0
+  },
+  "captureSettings": {
+    "frames": 1,
+    "fps": 1000,
+    "fixedVirtualTime": true
+  },
+  "browserErrors": [],
+  "timing": {
+    "setupMs": 3367.764332999999,
+    "bindingMs": 545.1682920000021,
+    "captureMs": 2474.770083000003,
+    "totalMs": 7354.289375
+  },
+  "transcript": [
+    {
+      "name": "get_connection",
+      "code": "bound"
+    },
+    {
+      "name": "read_show",
+      "code": "read"
+    },
+    {
+      "name": "read_show",
+      "code": "read"
+    },
+    {
+      "name": "begin_edit",
+      "code": "begun",
+      "operation_id": "67395530-9fb5-48b4-8518-e41b22f825d9"
+    },
+    {
+      "name": "replace_show",
+      "code": "changed"
+    },
+    {
+      "name": "commit_edit",
+      "code": "outcome",
+      "receipt": {
+        "status": "applied",
+        "settlement": "saving"
+      }
+    },
+    {
+      "name": "get_outcome",
+      "code": "outcome",
+      "receipt": {
+        "status": "applied",
+        "settlement": "saved"
+      }
+    },
+    {
+      "name": "read_show",
+      "code": "read"
+    },
+    {
+      "name": "begin_edit",
+      "code": "begun",
+      "operation_id": "3949e238-d46a-4645-9b61-ddb1831daf33"
+    },
+    {
+      "name": "replace_show",
+      "code": "changed"
+    },
+    {
+      "name": "commit_edit",
+      "code": "outcome",
+      "receipt": {
+        "status": "waiting"
+      }
+    },
+    {
+      "name": "get_outcome",
+      "code": "outcome",
+      "receipt": {
+        "status": "waiting"
+      }
+    },
+    {
+      "name": "get_outcome",
+      "code": "outcome",
+      "receipt": {
+        "status": "refused",
+        "reason": "revision-conflict"
+      }
+    }
+  ],
+  "waiting": {
+    "focusedField": "Duration seconds exact time",
+    "draft": "0.75",
+    "durableUnchanged": true
+  },
+  "refusal": {
+    "status": "refused",
+    "reason": "revision-conflict",
+    "manualClipDurationMs": 750,
+    "showEndMs": 1000,
+    "candidatePatternAbsent": "mcp-green"
+  },
+  "captures": [
+    {
+      "name": "dirty-manual-250-00000.png",
+      "timeMs": 250,
+      "path": "dirty-manual-250-00000.png",
+      "sha256": "247f39a6081477cfc256750b8323e64d17274a2d61aedcd945059435bf4ab872",
+      "bytes": 25605,
+      "width": 416,
+      "height": 416,
+      "positions": [
+        {
+          "x": 111,
+          "y": 215,
+          "rgba": [
+            255,
+            0,
+            0,
+            255
+          ]
+        },
+        {
+          "x": 319,
+          "y": 215,
+          "rgba": [
+            255,
+            0,
+            0,
+            255
+          ]
+        }
+      ]
+    }
+  ]
+}
