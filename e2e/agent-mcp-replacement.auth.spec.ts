@@ -1,5 +1,6 @@
+import { execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Page, TestInfo } from '@playwright/test'
 import type { ShowRecordV2 } from '../src/engine/showCompositionV2'
@@ -10,7 +11,14 @@ import { squareWorkspaceShow } from './fixtures/showWorkspace'
 import { findStoredShowV2, seedShowV2 } from './support/showBackingRecords'
 import { connectShowMcp, type ShowMcpClient } from './support/agentMcpClient'
 
-const evidenceDirectory = join(process.cwd(), 'docs/reference/evidence/issue-1160-mcp-browser')
+const relevantTestFiles = [
+  'e2e/agent-mcp-replacement.auth.spec.ts',
+  'e2e/fixtures/authenticated.ts',
+  'e2e/support/agentMcpClient.ts',
+  'e2e/support/showBackingRecords.ts',
+  'src/test/showCapturePixelEvidence.ts',
+  'src/test/showMcpReplacementFixtures.ts',
+]
 const previewSettings = { isRunning: false, fidelity: 'fast', speed: 1, brightness: 1, lightSize: 0.5, diffusion: 0 } as const
 const red: Rgba = [255, 0, 0, 255]
 const green: Rgba = [0, 255, 0, 255]
@@ -157,6 +165,9 @@ function assertSamples(capture: CaptureEvidence, colors: readonly [Rgba, Rgba]):
 }
 
 function captureHarness(page: Page, testInfo: TestInfo, prefix: string) {
+  const testIdHash = createHash('sha256').update(testInfo.testId).digest('hex').slice(0, 16)
+  const runDirectory = join(process.cwd(), 'playwright-report', 'agent-mcp',
+    `${testIdHash}-worker-${testInfo.workerIndex}-retry-${testInfo.retry}-repeat-${testInfo.repeatEachIndex}`)
   const written = new Map<string, string>()
   const captures: CaptureEvidence[] = []
   let captureMs = 0
@@ -195,8 +206,8 @@ function captureHarness(page: Page, testInfo: TestInfo, prefix: string) {
       context.drawImage(bitmap, 0, 0)
       return { width: canvas.width, height: canvas.height, pixels: Array.from(context.getImageData(0, 0, canvas.width, canvas.height).data) }
     }, bytes.toString('base64'))
-    const evidencePath = join(evidenceDirectory, name)
-    await mkdir(evidenceDirectory, { recursive: true })
+    const evidencePath = join(runDirectory, name)
+    await mkdir(runDirectory, { recursive: true })
     await copyFile(output!, evidencePath)
     const value: CaptureEvidence = {
       name, timeMs, path: name, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length,
@@ -206,22 +217,32 @@ function captureHarness(page: Page, testInfo: TestInfo, prefix: string) {
     captureMs += performance.now() - start
     return value
   }
-  return { install, capture, captures, captureMs: () => captureMs }
+  return { install, capture, captures, captureMs: () => captureMs, runDirectory }
 }
 
 async function writeEvidence(name: string, testInfo: TestInfo, show: ShowRecordV2, harness: ReturnType<typeof captureHarness>, client: ShowMcpClient, timing: object, extra: object, browserErrors: string[]): Promise<void> {
   expect(browserErrors).toEqual([])
   expect(harness.captures.length).toBeGreaterThan(0)
-  for (const capture of harness.captures) expect((await stat(join(evidenceDirectory, capture.path))).size).toBe(capture.bytes)
+  for (const capture of harness.captures) {
+    const bytes = await readFile(join(harness.runDirectory, capture.path))
+    expect(bytes.length, `${capture.path} byte count`).toBe(capture.bytes)
+    expect(createHash('sha256').update(bytes).digest('hex'), `${capture.path} SHA-256`).toBe(capture.sha256)
+  }
+  const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+  const testFileStatus = execFileSync('git', ['status', '--short', '--', ...relevantTestFiles],
+    { encoding: 'utf8', maxBuffer: 8192 }).trim().split('\n').filter(Boolean)
   const manifest = {
-    issue: 1160, sourceBaseCommit: 'c4433f5a', test: name, workerIndex: testInfo.workerIndex, workers: 1,
+    issue: 1160, sourceCommit, test: name,
+    workers: testInfo.config.workers, workerIndex: testInfo.workerIndex, parallelIndex: testInfo.parallelIndex,
+    retry: testInfo.retry, repeatEachIndex: testInfo.repeatEachIndex,
+    testFilesUncommitted: testFileStatus.length > 0, testFileStatus,
     syntheticAccountConsumption: 'one account per test', show: { id: show.id, name: show.name },
     viewport: { width: 1280, height: 900 }, map: 'plane', referencePixelCount: 1024,
     previewSettings, captureSettings: { frames: 1, fps: 1000, fixedVirtualTime: true },
     browserErrors, timing, transcript: client.safeTranscript, ...extra,
     captures: harness.captures.map(({ image: _image, ...capture }) => capture),
   }
-  await writeFile(join(evidenceDirectory, `${name}.json`), JSON.stringify(manifest, null, 2) + '\n')
+  await writeFile(join(harness.runDirectory, `${name}.json`), JSON.stringify(manifest, null, 2) + '\n')
 }
 
 test('real MCP replacement publishes known pixels, Undo/Redo, and reload (#1160)', async ({ page }, testInfo) => {
