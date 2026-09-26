@@ -15,7 +15,7 @@
   "sequences": [
     "For each of 12 rejections: begin, replace valid solid A, refuse invalid candidate, retry identical A unchanged, replace corrected A at 0.5 opacity, commit once, reopen .pxlshow",
     "For each of two legal boundaries: replace, commit, reopen native artifacts, render red at 999 ms",
-    "Replace held Group A, move its occurrence from 2000 to 2500 ms, replace with adjacent-color B, refuse removal of former Group Clip, dim green Clip, commit once, Undo, Redo"
+    "Replace held Group A, move its occurrence from 2000 to 2500 ms, replace with adjacent-color B, refuse removal of an A-only top-level Clip, dim green Clip, commit once, Undo, Redo"
   ],
   "oracles": [
     "MCP structured refusal reason and specific issue code/path where defined",

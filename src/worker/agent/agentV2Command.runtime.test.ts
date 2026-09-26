@@ -1067,10 +1067,10 @@ it('supersedes Group edits with an adjacent-color replacement and preserves one 
     const inputA = structuredClone(replacementA)
     const replacementB = adjacent.buildShow(before.id)
     const inputB = structuredClone(replacementB)
-    const formerGroupClipId = replacementA.composition.groupDefinitions[0].clips[0].id
-    expect(formerGroupClipId).toBeTruthy()
-    expect(replacementA.composition.groupDefinitions[0].clips.some(clip => clip.id === formerGroupClipId)).toBe(true)
-    expect(replacementB.composition.clips.some(clip => clip.id === formerGroupClipId)).toBe(false)
+    const formerClipId = replacementA.composition.clips[0].id
+    expect(formerClipId).toBeTruthy()
+    expect(replacementA.composition.clips.some(clip => clip.id === formerClipId)).toBe(true)
+    expect(replacementB.composition.clips.some(clip => clip.id === formerClipId)).toBe(false)
     expect(validateShowRecordV2(replacementA)).toEqual([])
     expect(validateShowRecordV2(replacementB)).toEqual([])
     const begun = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Supersede held Group with colors', idempotency_key: 'begin-supersede' })
@@ -1081,7 +1081,7 @@ it('supersedes Group edits with an adjacent-color replacement and preserves one 
     expect(occurrence.startMs).toBe(2_000)
     expect((await editor.tool('move_group_occurrence', { ...identity, idempotency_key: 'move-group-a', group_occurrence_id: occurrence.id, start_ms: 2_500 })).code).toBe('changed')
     expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'replace-colors-b', show: replacementB })).code).toBe('changed')
-    const refused = await editor.tool('remove_clips', { ...identity, idempotency_key: 'remove-former-group-clip', clip_ids: [formerGroupClipId] })
+    const refused = await editor.tool('remove_clips', { ...identity, idempotency_key: 'remove-former-clip', clip_ids: [formerClipId] })
     expect(refused).toMatchObject({ code: 'refused', issues: expect.arrayContaining([expect.objectContaining({ code: 'unknown-id' })]) })
     expect((await editor.tool('update_clips', { ...identity, idempotency_key: 'dim-green', updates: [{ clip_id: 'green-clip', appearance: { apply: { scope: 'whole-clip' }, opacity: 0.5 } }] })).code).toBe('changed')
     expect(editor.current()).toEqual(before)
