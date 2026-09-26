@@ -71,12 +71,41 @@ function greenShow(id: string): ShowRecordV2 {
   return show
 }
 
-async function seed(page: Page, id: string, name: string): Promise<ShowRecordV2> {
-  const show = await seedShowV2(page, { ...squareWorkspaceShow(1), id, name }, name)
+function overlaidShow(id: string): ShowRecordV2 {
+  const show = solidShow(id)
+  const redClip = show.composition.clips[0]
+  redClip.id = 'base-red-clip'
+  redClip.appearance.keys[0].id = 'base-red-appearance'
+  show.composition.patternInstances.push({
+    ...structuredClone(greenShow(id).composition.patternInstances[0]), id: 'overlay-green-instance',
+  })
+  show.composition.layers.push({ id: 'overlay-green-layer', zoneId: 'left', name: 'Green overlay', rank: 1 })
+  show.composition.clips.push({
+    ...structuredClone(redClip), id: 'overlay-green-clip',
+    instanceId: 'overlay-green-instance', layerId: 'overlay-green-layer',
+    appearance: { keys: [{ ...structuredClone(redClip.appearance.keys[0]), id: 'overlay-green-appearance' }] },
+  })
+  return show
+}
+
+async function seedPatterns(page: Page): Promise<void> {
   for (const pattern of zoneCase.patterns) {
     const response = await page.context().request.post('/api/patterns', { data: pattern })
     expect(response.ok(), `POST /api/patterns/${pattern.id}: HTTP ${response.status()}`).toBe(true)
   }
+}
+
+async function seedSolid(page: Page, id: string, name: string): Promise<ShowRecordV2> {
+  return seedShowV2(page, { ...squareWorkspaceShow(1), id, name }, name, {
+    edit: converted => {
+      Object.assign(converted, solidShow(id), { name, updatedAt: converted.updatedAt })
+    },
+  })
+}
+
+async function seed(page: Page, id: string, name: string): Promise<ShowRecordV2> {
+  const show = await seedShowV2(page, { ...squareWorkspaceShow(1), id, name }, name)
+  await seedPatterns(page)
   return show
 }
 
@@ -220,7 +249,7 @@ function captureHarness(page: Page, testInfo: TestInfo, prefix: string) {
   return { install, capture, captures, captureMs: () => captureMs, runDirectory }
 }
 
-async function writeEvidence(name: string, testInfo: TestInfo, show: ShowRecordV2, harness: ReturnType<typeof captureHarness>, client: ShowMcpClient, timing: object, extra: object, browserErrors: string[]): Promise<void> {
+async function writeEvidence(name: string, testInfo: TestInfo, show: ShowRecordV2, harness: ReturnType<typeof captureHarness>, client: ShowMcpClient, timing: object, extra: object, browserErrors: string[], issue = 1160): Promise<void> {
   expect(browserErrors).toEqual([])
   expect(harness.captures.length).toBeGreaterThan(0)
   for (const capture of harness.captures) {
@@ -232,7 +261,7 @@ async function writeEvidence(name: string, testInfo: TestInfo, show: ShowRecordV
   const testFileStatus = execFileSync('git', ['status', '--short', '--', ...relevantTestFiles],
     { encoding: 'utf8', maxBuffer: 8192 }).trim().split('\n').filter(Boolean)
   const manifest = {
-    issue: 1160, sourceCommit, test: name,
+    issue, sourceCommit, test: name,
     workers: testInfo.config.workers, workerIndex: testInfo.workerIndex, parallelIndex: testInfo.parallelIndex,
     retry: testInfo.retry, repeatEachIndex: testInfo.repeatEachIndex,
     testFilesUncommitted: testFileStatus.length > 0, testFileStatus,
@@ -358,5 +387,172 @@ test('dirty duration refuses a stale MCP replacement after manual commit (#1160)
       waiting: { focusedField: 'Duration seconds exact time', draft: '0.75', durableUnchanged: true },
       refusal: { status: 'refused', reason: 'revision-conflict', manualClipDurationMs: 750, showEndMs: 1000, candidatePatternAbsent: 'mcp-green' },
     }, browserErrors)
+  } finally { await client.close() }
+})
+
+test('MCP replacement reconciles Clip selection, UI Delete, and keyboard history (#1162)', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const started = performance.now()
+  const browserErrors: string[] = []
+  page.on('pageerror', error => browserErrors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error') browserErrors.push(message.text()) })
+  const original = await seed(page, 'agent-mcp-1162-selection', 'MCP selection and history proof')
+  await openEditor(page, original)
+  const harness = captureHarness(page, testInfo, 'selection')
+  await harness.install()
+  const bindingStart = performance.now()
+  const client = await boundClient(page, original)
+  const bindingMs = performance.now() - bindingStart
+  const selections: Array<Record<string, unknown>> = []
+  const rail = page.getByRole('treeitem', { name: original.name, exact: true })
+  const duration = page.getByRole('textbox', { name: 'Duration seconds exact time' })
+  try {
+    const solid = solidShow(original.id)
+    await replace(client, solid, 'Show solid red before Clip selection')
+    await assertStored(page, original, solid)
+    const redClip = page.getByRole('button', { name: 'Select Solid red', exact: true })
+    await redClip.click()
+    await expect(duration).toBeVisible()
+    await expect(duration).toHaveValue('1')
+    selections.push({ step: 'selected original red Clip', railSelected: await rail.getAttribute('aria-selected'),
+      durationVisible: await duration.isVisible(), durationValue: await duration.inputValue() })
+
+    const overlaid = overlaidShow(original.id)
+    const deleted = structuredClone(overlaid)
+    deleted.composition.clips = deleted.composition.clips.filter(clip => clip.id !== 'overlay-green-clip')
+    deleted.composition.patternInstances = deleted.composition.patternInstances.filter(instance => instance.id !== 'overlay-green-instance')
+    await replace(client, overlaid, 'Replace selected Clip with red base and green overlay')
+    await assertStored(page, original, overlaid)
+    await expect(duration).not.toBeVisible()
+    await expect(rail).toHaveAttribute('aria-selected', 'true')
+    await expect(redClip).toBeVisible()
+    const greenClip = page.getByRole('button', { name: 'Select Solid green', exact: true })
+    await expect(greenClip).toBeVisible()
+    selections.push({ step: 'replacement reconciled missing selected Clip', railSelected: await rail.getAttribute('aria-selected'),
+      oldDurationVisible: await duration.isVisible(), redVisible: await redClip.isVisible(), greenVisible: await greenClip.isVisible() })
+    const overlaid250 = await harness.capture('overlaid-250', 250)
+    assertSamples(overlaid250, [green, green])
+    let faultExcerpt = ''
+    try { assertSamples(overlaid250, [red, red]) } catch (error) { faultExcerpt = String(error).slice(0, 500) }
+    expect(faultExcerpt).toContain('Expected')
+    assertSamples(overlaid250, [green, green])
+
+    await greenClip.click()
+    await expect(duration).toBeVisible()
+    await greenClip.click()
+    await expect(duration).not.toBeVisible()
+    await expect(greenClip).toBeFocused()
+    await page.keyboard.press('Delete')
+    await assertStored(page, original, deleted)
+    await expect(greenClip).toHaveCount(0)
+    await expect(redClip).toBeVisible()
+    selections.push({ step: 'deleted green Clip from timeline button', keyboardTarget: 'Select Solid green',
+      greenCount: await greenClip.count(), redVisible: await redClip.isVisible() })
+    assertSamples(await harness.capture('deleted-red-250', 250), [red, red])
+
+    await redClip.click()
+    await redClip.click()
+    await expect(redClip).toBeFocused()
+    await redClip.press('ControlOrMeta+z')
+    await assertStored(page, original, overlaid)
+    await expect(greenClip).toBeVisible()
+    selections.push({ step: 'keyboard Undo restored replacement', keyboardTarget: 'Select Solid red',
+      greenVisible: await greenClip.isVisible() })
+    assertSamples(await harness.capture('undo-green-250', 250), [green, green])
+
+    await redClip.press('ControlOrMeta+Shift+z')
+    await assertStored(page, original, deleted)
+    await expect(greenClip).toHaveCount(0)
+    await expect(redClip).toBeVisible()
+    selections.push({ step: 'keyboard Redo restored deletion', keyboardTarget: 'Select Solid red',
+      greenCount: await greenClip.count(), redVisible: await redClip.isVisible() })
+    assertSamples(await harness.capture('redo-red-250', 250), [red, red])
+    await writeEvidence('selection-history', testInfo, original, harness, client,
+      { setupMs: bindingStart - started, bindingMs, captureMs: harness.captureMs(), totalMs: performance.now() - started }, {
+        selections, assertions: ['complete saved record after each replacement, Delete, Undo, and Redo',
+          'old selected Clip detail removed while Show rail selection persists', 'literal green/red Stage pixels at 250 ms'],
+        faultControl: { image: overlaid250.path, rejectedExpected: [red, red], rejected: true,
+          excerpt: faultExcerpt, restoredExpected: [green, green] },
+      }, browserErrors, 1162)
+  } finally { await client.close() }
+})
+
+test('navigation retires an uncommitted MCP replacement without saving either Show (#1162)', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const started = performance.now()
+  const browserErrors: string[] = []
+  page.on('pageerror', error => browserErrors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error') browserErrors.push(message.text()) })
+  const showA = await seedSolid(page, 'agent-mcp-1162-navigation-a', 'MCP private Show A')
+  const showB = await seedSolid(page, 'agent-mcp-1162-navigation-b', 'MCP private Show B')
+  await seedPatterns(page)
+  const originalA = await findStoredShowV2(page, showA.id)
+  const originalB = await findStoredShowV2(page, showB.id)
+  expect(originalA).toEqual(showA)
+  expect(originalB).toEqual(showB)
+  const assertUnchanged = async () => {
+    expect(await findStoredShowV2(page, showA.id)).toEqual(originalA)
+    expect(await findStoredShowV2(page, showB.id)).toEqual(originalB)
+  }
+  await openEditor(page, showA)
+  const harness = captureHarness(page, testInfo, 'navigation')
+  await harness.install()
+  const bindingStart = performance.now()
+  const client = await boundClient(page, showA)
+  const bindingMs = performance.now() - bindingStart
+  const selections: Array<Record<string, unknown>> = []
+  const railA = page.getByRole('treeitem', { name: /^MCP private Show A(?: More actions for MCP private Show A)?$/ })
+  const railB = page.getByRole('treeitem', { name: /^MCP private Show B(?: More actions for MCP private Show B)?$/ })
+  const identity = { binding_id: client.bindingId, operation_id: '' }
+  try {
+    await expect(railA).toHaveAttribute('aria-selected', 'true')
+    await expect(railB).toBeVisible()
+    expect((await client.tool('read_show', { binding_id: client.bindingId })).code).toBe('read')
+    const begun = await client.tool('begin_edit', {
+      binding_id: client.bindingId, intent: 'Private green candidate that must retire on navigation', idempotency_key: randomUUID(),
+    })
+    expect(begun.code).toBe('begun')
+    expect(typeof begun.operation_id).toBe('string')
+    identity.operation_id = begun.operation_id as string
+    expect((await client.tool('replace_show', { ...identity, idempotency_key: randomUUID(), show: greenShow(showA.id) })).code).toBe('changed')
+    await assertUnchanged()
+    selections.push({ step: 'private green candidate on A', selectedA: await railA.getAttribute('aria-selected'),
+      selectedB: await railB.getAttribute('aria-selected'), showId: await page.evaluate(() => (window as CaptureWindow).__pxlblzShow?.showId) })
+    assertSamples(await harness.capture('a-before-navigation-250', 250), [red, red])
+
+    await railB.click()
+    await expect(railB).toHaveAttribute('aria-selected', 'true')
+    await page.waitForFunction(id => (window as CaptureWindow).__pxlblzShow?.showId === id, showB.id)
+    await expect(page.getByTestId('show-stage-canvas-frame')).toHaveAttribute('aria-busy', 'false')
+    await page.evaluate(settings => (window as CaptureWindow).__pxlblzShow!.setPreview(settings), previewSettings)
+    await expect.poll(async () => (await client.tool('read_show', { binding_id: client.bindingId })).code).toBe('no_live_editor')
+    const refusedAtB = await client.tool('commit_edit', { ...identity, idempotency_key: randomUUID() })
+    expect(refusedAtB.code).toBe('no_live_editor')
+    await assertUnchanged()
+    selections.push({ step: 'B selected after old binding retired', selectedA: await railA.getAttribute('aria-selected'),
+      selectedB: await railB.getAttribute('aria-selected'), showId: await page.evaluate(() => (window as CaptureWindow).__pxlblzShow?.showId),
+      commitCode: refusedAtB.code })
+    assertSamples(await harness.capture('b-250', 250), [red, red])
+
+    await railA.click()
+    await expect(railA).toHaveAttribute('aria-selected', 'true')
+    await page.waitForFunction(id => (window as CaptureWindow).__pxlblzShow?.showId === id, showA.id)
+    await expect(page.getByTestId('show-stage-canvas-frame')).toHaveAttribute('aria-busy', 'false')
+    await page.evaluate(settings => (window as CaptureWindow).__pxlblzShow!.setPreview(settings), previewSettings)
+    const refusedAtReturn = await client.tool('commit_edit', { ...identity, idempotency_key: randomUUID() })
+    expect(refusedAtReturn.code).toBe('no_live_editor')
+    await assertUnchanged()
+    selections.push({ step: 'A selected again without binding resurrection', selectedA: await railA.getAttribute('aria-selected'),
+      selectedB: await railB.getAttribute('aria-selected'), showId: await page.evaluate(() => (window as CaptureWindow).__pxlblzShow?.showId),
+      commitCode: refusedAtReturn.code })
+    assertSamples(await harness.capture('a-return-250', 250), [red, red])
+    await writeEvidence('navigation-retirement', testInfo, showA, harness, client,
+      { setupMs: bindingStart - started, bindingMs, captureMs: harness.captureMs(), totalMs: performance.now() - started }, {
+        shows: [{ id: showA.id, name: showA.name }, { id: showB.id, name: showB.name }],
+        selections, refusals: { atB: refusedAtB.code, atReturn: refusedAtReturn.code },
+        assertions: ['A and B complete durable records remain their pre-navigation snapshots at every step',
+          'old binding returns no_live_editor after B selection and after returning to A',
+          'both editors display literal solid-red Stage pixels at 250 ms'],
+      }, browserErrors, 1162)
   } finally { await client.close() }
 })

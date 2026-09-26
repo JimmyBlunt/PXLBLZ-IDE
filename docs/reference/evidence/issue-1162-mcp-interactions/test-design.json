@@ -1,0 +1,32 @@
+{
+  "invariants": [
+    "An accepted MCP replacement preserves the connected Show identity, selected rail row, complete durable authored record, and ordinary editor history.",
+    "Replacing a selected Clip whose id disappears closes its clean detail inspector; a new Clip can be selected and deleted through the timeline keyboard path.",
+    "Deleting the upper Clip removes its orphan Pattern instance while retaining both Layers, the base Clip, Show End, and all other authored fields; keyboard Undo and Redo restore complete records.",
+    "An uncommitted private replacement cannot save either Show after ordinary rail navigation retires its binding, including after returning to the original Show.",
+    "Each fixed-time canvas capture has literal grid-centre RGBA, an ignored per-test package, a credentials-free MCP transcript, and no browser errors."
+  ],
+  "partitions": [
+    "Selected clean red Clip whose id is removed by replacement, versus newly introduced green Clip on an opaque higher-ranked Layer.",
+    "Accepted replacement, UI Delete, keyboard Undo, and keyboard Redo with both complete durable records and visible Stage colours.",
+    "Private candidate on Show A, navigation to distinct Show B, and return to A without rearming or moving the MCP connection.",
+    "Current connected binding versus retired old binding for read_show and two distinct-key commit_edit calls."
+  ],
+  "sequences": [
+    "Seed Show and Patterns, bind through the visible drawer, commit solid red, select its Clip, replace with red base and green overlay, Delete green through the focused timeline button, then keyboard Undo and Redo.",
+    "Seed distinct solid-red Shows A and B, snapshot both saved records, bind on A, begin and privately replace A with green, click B in the rail, await no_live_editor, attempt old commit, click A, and attempt old commit again.",
+    "Challenge the green overlay capture with an intentionally wrong red/red expectation, observe assertion failure, then restore and pass the literal green/green expectation."
+  ],
+  "oracles": [
+    "Real OAuth/MCP structuredContent and safe call transcript, visible selected rail row and Clip controls, clean duration textbox visibility/value, and focused timeline keyboard events.",
+    "Full D1 Show record equality after each committed edit and after every private navigation step, against independently cloned expected records or pre-edit saved snapshots.",
+    "Real canvas toBlob PNGs decoded at declared 32x32 grid centres at fixed 250 ms, with literal opaque red/green RGBA, copied byte counts and SHA-256 verified before manifest write.",
+    "Old binding read_show and commit_edit return top-level no_live_editor after navigation; neither Show's saved snapshot changes or resurrects on return.",
+    "The wrong-colour assertion fails and the restored assertion passes; this qualifies the image oracle, not a production mutation."
+  ],
+  "residualGaps": [
+    "The browser cases cover Fast 2D plane rendering and two full-duration opaque Layers; hardware, Precise fidelity, effects, and real timer expiry remain outside this slice.",
+    "No new MCP arm or explicit move follows navigation, so behavior after rebinding or cross-window movement is not claimed.",
+    "Focused and four-case browser runs before commit are local uncommitted evidence; exact committed-tip runner suites, candidate review, and landing belong to the coordinator."
+  ]
+}

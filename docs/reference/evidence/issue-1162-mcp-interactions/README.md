@@ -1,0 +1,16 @@
+# Issue #1162: MCP replacement interactions
+
+`e2e/agent-mcp-replacement.auth.spec.ts` drives the ordinary authenticated Show editor and a dynamically registered external MCP client. The two new cases exercise selected Clip replacement followed by UI Delete and keyboard history, and a private replacement retired by A → B → A rail navigation. They use complete saved-record comparisons, the visible editor and rail, top-level MCP results, and real 250 ms canvas PNG captures. [Test design](test-design.json) records the invariants and limits.
+
+The first focused attempt passed selection/history and failed navigation at a Playwright locator: the selected rail item's accessible name gained its contextual “More actions for …” button. The locator now accepts the row name with or without that suffix. The focused rerun passed both #1162 cases with `--workers=2` in 19.0 s (`/tmp/wrsp-log/20260926T233923-8050-npx-tsx.log`, `EXIT:0`). The full existing spec then passed four cases with two workers in 40.1 s (`/tmp/wrsp-log/20260926T233956-9855-npx-tsx.log`, `EXIT:0`). The failed diagnostic attempt is `/tmp/wrsp-log/20260926T233805-4170-npx-tsx.log` (`EXIT:1`). These are local runs against uncommitted test changes, not committed-tip WRSP runner proof.
+
+The full-run selection manifest reports a clean duration field with value `1`, removal of that inspector after replacement, preserved Show rail selection, and a green Clip button. Its four 416×416 captures sample green/green after overlay, red/red after Delete, green/green after keyboard Undo, and red/red after keyboard Redo. Complete durable records match independently cloned expected records at each step. An intentional wrong red/red image expectation failed, then green/green passed. This is an oracle fault control, not a production mutation result.
+
+The navigation manifest reports A selected before departure, B selected after the rail click, and A selected on return, each with the matching `__pxlblzShow.showId`. The old binding returned `no_live_editor` for `read_show` at B and for `commit_edit` at B and after return; both saved Shows stayed equal to their original complete snapshots. Its three captures sample red/red on A, B, and returned A. Both new manifests report zero browser errors, one synthetic account per test, worker count 2, retry 0, repeat 0, and verified PNG byte counts and SHA-256. The transcript contains only tool names, codes, operation IDs, and bounded receipt fields, with no credentials.
+
+The ignored full-run packages to preserve are:
+
+- `playwright-report/agent-mcp/526e0d86af6f7828-worker-1-retry-0-repeat-0/` — `selection-history.json`, four PNGs, `totalMs: 15548.152417000001`, parallel index 1.
+- `playwright-report/agent-mcp/2aec6f3ba8356d0a-worker-1-retry-0-repeat-0/` — `navigation-retirement.json`, three PNGs, `totalMs: 12026.843957999998`, parallel index 1.
+
+Both manifests record `sourceCommit: 41f257d1b2c12921ca8208fbb79b30377c8e4444` and `testFilesUncommitted: true`: that is the actual HEAD during these runs, not an attribution of the new test code to that commit. Captures stay in ignored output, outside tracked docs. The coordinator still owns committed-tip runner proof, review, rebase, and landing.
