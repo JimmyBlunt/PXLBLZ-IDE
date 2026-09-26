@@ -159,3 +159,18 @@ export const showMcpReplacementCases: ShowMcpReplacementCase[] = [
     buildShow: record,
   },
 ]
+
+export const showMcpGainPattern = {
+  id: 'mcp-gain', name: 'Bounded gain',
+  src: 'export var gain=0.25; export function sliderGain(v){gain=v} export function render2D(i,x,y){rgb(gain,0,0)}',
+  controls: { sliderGain: 0.25 }, updatedAt: 1,
+}
+
+export function showMcpGainReplacement(id: string): ShowRecordV2 {
+  const show = showMcpReplacementCases[0].buildShow(id)
+  show.composition.patternInstances[0].pattern = { kind: 'user', id: showMcpGainPattern.id }
+  show.composition.patternInstances[0].patternName = showMcpGainPattern.name
+  show.composition.patternInstances[0].controlTargets = { sliderGain: 0.25 }
+  show.composition.clips[0].durationMs = 500
+  return show
+}

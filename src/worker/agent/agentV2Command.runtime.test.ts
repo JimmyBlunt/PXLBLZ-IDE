@@ -33,8 +33,9 @@ import { STOCK_SHOW_IDS } from '../../pixelblaze/stock/showIds'
 import { SHOW_COMMANDS_V2 } from '../../engine/showCommandsV2/registry'
 import type { ShowRecordV2 } from '../../engine/showCompositionV2'
 import { validateShowRecordV2 } from '../../engine/showCompositionV2'
-import { nativeShowV2Artifacts } from '../../test/showV2IntegratedSequenceHarness'
-import { showMcpReplacementCases } from '../../test/showMcpReplacementFixtures'
+import { nativeShowV2Artifacts, exportedScalar } from '../../test/showV2IntegratedSequenceHarness'
+import { showMcpReplacementCases, showMcpGainPattern, showMcpGainReplacement } from '../../test/showMcpReplacementFixtures'
+import { showV2LayoutEditorFixture } from '../../test/showV2LayoutEditorFixture'
 import { encodeFastReplaySnapshot } from '../../engine/fastReplay'
 
 globalThis.Blob = (await import('node:buffer')).Blob as unknown as typeof globalThis.Blob
@@ -274,7 +275,7 @@ it('runs the #1029 sequence over a v2 record through the real MCP path and reope
 
 /** One live binding over a v2 record, with the store and provider behind it. */
 let identityIndex = 0
-async function boundEditor(options: { failSave?: boolean; patterns?: Array<typeof PATTERN> } = {}) {
+async function boundEditor(options: { failSave?: boolean; patterns?: ReadonlyArray<typeof PATTERN>; beforeSave?: (id: string, record: ShowRecordV2) => Promise<void> } = {}) {
   runtime = startRuntime()
   const token = await authorize()
   const patterns = [PATTERN, ...(options.patterns ?? [])]
@@ -285,8 +286,9 @@ async function boundEditor(options: { failSave?: boolean; patterns?: Array<typeo
   window.history.replaceState(null, '', `/studio/shows/${record.id}`)
   useShowStore.setState(showInitialState)
   let saved = structuredClone(record)
-  const write = vi.fn(async (_id: string, next: ShowRecordV2) => {
+  const write = vi.fn(async (id: string, next: ShowRecordV2) => {
     if (options.failSave) throw new Error('save refused')
+    await options.beforeSave?.(id, next)
     saved = structuredClone(next)
   })
   setPersonalContentProvider({
@@ -506,4 +508,438 @@ it('reports a failed save as a rolled-back receipt with the record and history r
     expect(editor.history().past).toEqual([])
     expect(useShowStore.getState().showV2SaveFailure?.showId).toBe(editor.record.id)
   } finally { editor.close() }
+}, 120_000)
+
+it('commits command A then replacement then B as one saved authored record', async () => {
+  const startedAt = performance.now()
+  const solid = showMcpReplacementCases[0]
+  const editor = await boundEditor({ patterns: solid.patterns })
+  try {
+    const before = structuredClone(editor.current())
+    const replacement = solid.buildShow(before.id)
+    const input = structuredClone(replacement)
+    const begun = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Replace between commands', idempotency_key: 'begin-a-replace-b' })
+    expect(begun.code).toBe('begun')
+    const identity = { binding_id: editor.binding_id, operation_id: begun.operation_id as string }
+    expect((await editor.tool('set_show_end', { ...identity, idempotency_key: 'command-a', end_ms: 30_000 })).code).toBe('changed')
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'replacement', show: replacement })).code).toBe('changed')
+    expect((await editor.tool('rename_show', { ...identity, idempotency_key: 'command-b', name: 'After replacement' })).code).toBe('changed')
+    expect(editor.current()).toEqual(before)
+    expect(editor.readSaved()).toEqual(before)
+    expect(editor.history()).toEqual({ past: [], future: [] })
+    expect(editor.write).not.toHaveBeenCalled()
+    expect((await editor.tool('commit_edit', { ...identity, idempotency_key: 'commit-a-replace-b' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', identity)).toMatchObject({ code: 'outcome', receipt: { status: 'applied', settlement: 'saved' } }))
+    const expected = { ...input, name: 'After replacement', updatedAt: editor.current().updatedAt }
+    expect(expected.composition.showEndMs).toBe(1_000)
+    expect(editor.current()).toEqual(expected)
+    expect(editor.readSaved()).toEqual(expected)
+    expect(editor.history()).toEqual({ past: [before], future: [] })
+    expect(editor.write).toHaveBeenCalledTimes(1)
+    expect(replacement).toEqual(input)
+    const native = await nativeShowV2Artifacts(editor.readSaved(), editor.dependencies, solid.mapPoints)
+    const bundle = buildShowFileBundle(editor.readSaved(), { patterns: editor.dependencies.patterns, maps: [], libraries: [] }, { appVersion: 'mcp-v2', exportedAt: '2026-01-01T00:00:00.000Z' })
+    expect((await parseShowFileBundle(await serializeShowFileBundle(bundle.bundle), { acceptV2: true })).show).toEqual(expected)
+    const replay = native.replay('fast')
+    replay.advanceTo(250, { stepMs: 1, forceFullIntermediateRender: true })
+    expect(encodeFastReplaySnapshot(replay.snapshot()).frame).toEqual([1, 0, 0])
+    console.info(`MCP history A-replace-B: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+it('edits an introduced Clip after replacement, then Undo and Redo restore exact authored snapshots', async () => {
+  const startedAt = performance.now()
+  const solid = showMcpReplacementCases[0]
+  const editor = await boundEditor({ patterns: solid.patterns })
+  try {
+    const original = structuredClone(editor.current())
+    const replacement = solid.buildShow(original.id)
+    const first = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Introduce red Clip', idempotency_key: 'begin-replacement' })
+    expect(first.code).toBe('begun')
+    const firstIdentity = { binding_id: editor.binding_id, operation_id: first.operation_id as string }
+    expect((await editor.tool('replace_show', { ...firstIdentity, idempotency_key: 'replace', show: replacement })).code).toBe('changed')
+    expect((await editor.tool('commit_edit', { ...firstIdentity, idempotency_key: 'commit' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', firstIdentity)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    const replaced = structuredClone(editor.current())
+    expect(replaced).toEqual({ ...replacement, name: original.name, updatedAt: replaced.updatedAt })
+    expect(editor.readSaved()).toEqual(replaced)
+    expect(editor.history()).toEqual({ past: [original], future: [] })
+    expect(editor.write).toHaveBeenCalledTimes(1)
+
+    const read = await editor.tool('read_show', { binding_id: editor.binding_id })
+    expect(read).toMatchObject({ code: 'read', show: replaced })
+    const clipId = (read.show as ShowRecordV2).composition.clips[0].id
+    expect(clipId).toBe('red-clip')
+    const second = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Dim introduced Clip', idempotency_key: 'begin-opacity' })
+    expect(second.code).toBe('begun')
+    const secondIdentity = { binding_id: editor.binding_id, operation_id: second.operation_id as string }
+    expect((await editor.tool('update_clips', { ...secondIdentity, idempotency_key: 'opacity', updates: [{ clip_id: clipId, appearance: { apply: { scope: 'whole-clip' }, opacity: 0.5 } }] })).code).toBe('changed')
+    expect((await editor.tool('commit_edit', { ...secondIdentity, idempotency_key: 'commit' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', secondIdentity)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    const edited = structuredClone(editor.current())
+    const expectedEdited = structuredClone(replaced)
+    expectedEdited.updatedAt = edited.updatedAt
+    expectedEdited.composition.clips[0].appearance!.keys[0].value.opacity = 0.5
+    expect(edited).toEqual(expectedEdited)
+    expect(editor.readSaved()).toEqual(edited)
+    expect(editor.history()).toEqual({ past: [original, replaced], future: [] })
+    expect(editor.write).toHaveBeenCalledTimes(2)
+
+    expect(await useShowStore.getState().undoShowV2Pilot(original.id)).toBe(true)
+    const undone = structuredClone(editor.current())
+    expect(undone).toEqual({ ...replaced, updatedAt: undone.updatedAt })
+    expect(editor.readSaved()).toEqual(undone)
+    expect(editor.history()).toEqual({ past: [original], future: [edited] })
+    expect(editor.write).toHaveBeenCalledTimes(3)
+    expect(await useShowStore.getState().redoShowV2Pilot(original.id)).toBe(true)
+    const redone = structuredClone(editor.current())
+    expect(redone).toEqual({ ...edited, updatedAt: redone.updatedAt })
+    expect(editor.readSaved()).toEqual(redone)
+    expect(editor.history()).toEqual({ past: [original, undone], future: [] })
+    expect(editor.write).toHaveBeenCalledTimes(4)
+    const native = await nativeShowV2Artifacts(editor.readSaved(), editor.dependencies, solid.mapPoints)
+    const bundle = buildShowFileBundle(editor.readSaved(), { patterns: editor.dependencies.patterns, maps: [], libraries: [] }, { appVersion: 'mcp-v2', exportedAt: '2026-01-01T00:00:00.000Z' })
+    expect((await parseShowFileBundle(await serializeShowFileBundle(bundle.bundle), { acceptV2: true })).show).toEqual(redone)
+    const replay = native.replay('fast')
+    replay.advanceTo(250, { stepMs: 1, forceFullIntermediateRender: true })
+    expect(encodeFastReplaySnapshot(replay.snapshot()).frame).toEqual([0.5, 0, 0])
+    console.info(`MCP history introduced Clip Undo Redo: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+it('shares a duplicated Clip runtime, then makes the copy independent before editing its control', async () => {
+  const startedAt = performance.now()
+  const editor = await boundEditor({ patterns: [showMcpGainPattern] })
+  try {
+    const original = structuredClone(editor.current())
+    const replacement = showMcpGainReplacement(original.id)
+    expect(validateShowRecordV2(replacement)).toEqual([])
+    const first = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Gain replacement', idempotency_key: 'begin-gain' })
+    const firstId = { binding_id: editor.binding_id, operation_id: first.operation_id as string }
+    expect((await editor.tool('replace_show', { ...firstId, idempotency_key: 'replace-gain', show: replacement })).code).toBe('changed')
+    expect((await editor.tool('commit_edit', { ...firstId, idempotency_key: 'commit-gain' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', firstId)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    const replaced = structuredClone(editor.current())
+    expect(replaced).toEqual({ ...replacement, name: original.name, updatedAt: replaced.updatedAt })
+    expect(editor.history().past).toEqual([original])
+    expect(editor.write).toHaveBeenCalledTimes(1)
+
+    expect(await editor.tool('read_show', { binding_id: editor.binding_id })).toMatchObject({ code: 'read', show: replaced })
+    const duplicate = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Share red runtime', idempotency_key: 'begin-duplicate' })
+    const duplicateId = { binding_id: editor.binding_id, operation_id: duplicate.operation_id as string }
+    const copied = await editor.tool('duplicate_clip', { ...duplicateId, idempotency_key: 'duplicate', clip_id: 'red-clip', start_ms: 500 })
+    expect(copied.code).toBe('changed')
+    const copyId = (copied.changes as Array<{ details: { clips: string[] } }>).flatMap(change => change.details.clips).find(id => id !== 'red-clip')!
+    expect(copyId).toBeTruthy()
+    expect((await editor.tool('commit_edit', { ...duplicateId, idempotency_key: 'commit-duplicate' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', duplicateId)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    const shared = structuredClone(editor.current())
+    expect(shared.composition.clips.map(clip => [clip.id, clip.startMs, clip.durationMs])).toEqual([['red-clip', 0, 500], [copyId, 500, 500]])
+    expect(shared.composition.clips[0].instanceId).toBe(shared.composition.clips[1].instanceId)
+    expect(shared.composition.patternInstances).toEqual(replaced.composition.patternInstances)
+    expect(editor.readSaved()).toEqual(shared)
+    expect(editor.history().past).toEqual([original, replaced])
+    expect(editor.write).toHaveBeenCalledTimes(2)
+    const sharedNative = await nativeShowV2Artifacts(editor.readSaved(), editor.dependencies)
+    expect(sharedNative.importedShow.composition).toEqual(shared.composition)
+    const sharedBundle = buildShowFileBundle(editor.readSaved(), { patterns: editor.dependencies.patterns, maps: [], libraries: [] }, { appVersion: 'mcp-v2', exportedAt: '2026-01-01T00:00:00.000Z' })
+    expect((await parseShowFileBundle(await serializeShowFileBundle(sharedBundle.bundle), { acceptV2: true })).show).toEqual(shared)
+
+    expect(await editor.tool('read_show', { binding_id: editor.binding_id })).toMatchObject({ code: 'read', show: shared })
+    const control = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Raise shared gain', idempotency_key: 'begin-shared-control' })
+    const controlId = { binding_id: editor.binding_id, operation_id: control.operation_id as string }
+    expect((await editor.tool('update_clips', { ...controlId, idempotency_key: 'shared-control', updates: [{ clip_id: 'red-clip', instance_properties: { controls: { sliderGain: 0.5 } } }] })).code).toBe('changed')
+    expect((await editor.tool('commit_edit', { ...controlId, idempotency_key: 'commit-shared-control' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', controlId)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    const raised = structuredClone(editor.current())
+    const expectedRaised = structuredClone(shared)
+    expectedRaised.updatedAt = raised.updatedAt
+    expectedRaised.composition.patternInstances[0].controlTargets = { sliderGain: 0.5 }
+    expect(raised).toEqual(expectedRaised)
+    expect(editor.readSaved()).toEqual(raised)
+    expect(editor.history().past).toEqual([original, replaced, shared])
+    expect(editor.write).toHaveBeenCalledTimes(3)
+    const raisedReplay = (await nativeShowV2Artifacts(raised, editor.dependencies)).replay('fast')
+    for (const atMs of [250, 750]) {
+      raisedReplay.advanceTo(atMs, { stepMs: 1, forceFullIntermediateRender: true })
+      expect(encodeFastReplaySnapshot(raisedReplay.snapshot()).frame).toEqual([0.5, 0, 0])
+    }
+
+    expect(await editor.tool('read_show', { binding_id: editor.binding_id })).toMatchObject({ code: 'read', show: raised })
+    const independent = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Fork copied Pattern', idempotency_key: 'begin-independent' })
+    const independentId = { binding_id: editor.binding_id, operation_id: independent.operation_id as string }
+    expect((await editor.tool('make_clip_pattern_independent', { ...independentId, idempotency_key: 'independent', clip_id: copyId })).code).toBe('changed')
+    expect((await editor.tool('commit_edit', { ...independentId, idempotency_key: 'commit-independent' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', independentId)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    const forked = structuredClone(editor.current())
+    const copyInstanceId = forked.composition.clips.find(clip => clip.id === copyId)!.instanceId
+    expect(copyInstanceId).not.toBe(forked.composition.clips[0].instanceId)
+    expect(forked.composition.patternInstances).toHaveLength(2)
+    expect(forked.composition.patternInstances[0]).toEqual(raised.composition.patternInstances[0])
+    expect(forked.composition.patternInstances[1]).toEqual({ ...raised.composition.patternInstances[0], id: copyInstanceId })
+    expect(editor.readSaved()).toEqual(forked)
+    expect(editor.history().past).toEqual([original, replaced, shared, raised])
+    expect(editor.write).toHaveBeenCalledTimes(4)
+
+    expect(await editor.tool('read_show', { binding_id: editor.binding_id })).toMatchObject({ code: 'read', show: forked })
+    const final = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Raise copied gain only', idempotency_key: 'begin-copy-control' })
+    const finalId = { binding_id: editor.binding_id, operation_id: final.operation_id as string }
+    expect((await editor.tool('update_clips', { ...finalId, idempotency_key: 'copy-control', updates: [{ clip_id: copyId, instance_properties: { controls: { sliderGain: 0.75 } } }] })).code).toBe('changed')
+    expect((await editor.tool('commit_edit', { ...finalId, idempotency_key: 'commit-copy-control' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', finalId)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    const finalRecord = structuredClone(editor.current())
+    const expectedFinal = structuredClone(forked)
+    expectedFinal.updatedAt = finalRecord.updatedAt
+    expectedFinal.composition.patternInstances[1].controlTargets = { sliderGain: 0.75 }
+    expect(finalRecord).toEqual(expectedFinal)
+    expect(finalRecord.composition.patternInstances[0].controlTargets).toEqual({ sliderGain: 0.5 })
+    expect(finalRecord.composition.patternInstances.map(instance => instance.pattern)).toEqual([{ kind: 'user', id: 'mcp-gain' }, { kind: 'user', id: 'mcp-gain' }])
+    expect(editor.readSaved()).toEqual(finalRecord)
+    expect(editor.history().past).toEqual([original, replaced, shared, raised, forked])
+    expect(editor.write).toHaveBeenCalledTimes(5)
+    const native = await nativeShowV2Artifacts(editor.readSaved(), editor.dependencies)
+    const bundle = buildShowFileBundle(editor.readSaved(), { patterns: editor.dependencies.patterns, maps: [], libraries: [] }, { appVersion: 'mcp-v2', exportedAt: '2026-01-01T00:00:00.000Z' })
+    expect((await parseShowFileBundle(await serializeShowFileBundle(bundle.bundle), { acceptV2: true })).show).toEqual(finalRecord)
+    const replay = native.replay('fast')
+    for (const [atMs, red] of [[250, 0.5], [750, 0.75]]) {
+      replay.advanceTo(atMs, { stepMs: 1, forceFullIntermediateRender: true })
+      expect(encodeFastReplaySnapshot(replay.snapshot()).frame).toEqual([red, 0, 0])
+    }
+    console.info(`MCP history shared-independent controls: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+it('moves a Group occurrence after replacement across a Layout switch without resetting shared time', async () => {
+  const startedAt = performance.now()
+  const fixture = showV2LayoutEditorFixture()
+  const editor = await boundEditor({ patterns: fixture.dependencies.patterns })
+  try {
+    const original = structuredClone(editor.current())
+    const replacement = structuredClone(fixture.record)
+    replacement.id = original.id
+    expect(validateShowRecordV2(replacement)).toEqual([])
+    const first = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Adopt held Group', idempotency_key: 'begin-group' })
+    const firstId = { binding_id: editor.binding_id, operation_id: first.operation_id as string }
+    expect((await editor.tool('replace_show', { ...firstId, idempotency_key: 'replace-group', show: replacement })).code).toBe('changed')
+    expect((await editor.tool('commit_edit', { ...firstId, idempotency_key: 'commit-group' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', firstId)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    const replaced = structuredClone(editor.current())
+    expect(replaced).toEqual({ ...replacement, name: original.name, updatedAt: replaced.updatedAt })
+    expect(editor.readSaved()).toEqual(replaced)
+    expect(editor.history().past).toEqual([original])
+    expect(editor.write).toHaveBeenCalledTimes(1)
+
+    expect(await editor.tool('read_show', { binding_id: editor.binding_id })).toMatchObject({ code: 'read', show: replaced })
+    const occurrence = replaced.composition.groupOccurrences[0]
+    expect(occurrence.startMs).toBe(2_000)
+    const second = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Move held Group', idempotency_key: 'begin-move-group' })
+    const secondId = { binding_id: editor.binding_id, operation_id: second.operation_id as string }
+    const move = await editor.tool('move_group_occurrence', { ...secondId, idempotency_key: 'move-group', group_occurrence_id: occurrence.id, start_ms: 3_000 })
+    expect(move.code).toBe('changed')
+    expect((await editor.tool('commit_edit', { ...secondId, idempotency_key: 'commit-move-group' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', secondId)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    const moved = structuredClone(editor.current())
+    const expectedMoved = structuredClone(replaced)
+    expectedMoved.updatedAt = moved.updatedAt
+    expectedMoved.composition.groupOccurrences[0].startMs = 3_000
+    expect(moved).toEqual(expectedMoved)
+    expect(moved.composition.groupDefinitions).toEqual(replaced.composition.groupDefinitions)
+    expect(moved.composition.groupOccurrences[0].layerBindings).toEqual(occurrence.layerBindings)
+    expect(moved.composition.patternInstances).toEqual(replaced.composition.patternInstances)
+    expect(moved.composition.layoutOccurrences.map(item => [item.startMs, item.durationMs])).toEqual([[0, 5_000], [5_000, 26_000]])
+    expect(moved.composition.groupOccurrences[0].layoutOccurrenceId).toBe(occurrence.layoutOccurrenceId)
+    expect(editor.readSaved()).toEqual(moved)
+    expect(editor.history()).toEqual({ past: [original, replaced], future: [] })
+    expect(editor.write).toHaveBeenCalledTimes(2)
+    const native = await nativeShowV2Artifacts(editor.readSaved(), editor.dependencies)
+    const bundle = buildShowFileBundle(editor.readSaved(), { patterns: editor.dependencies.patterns, maps: [], libraries: [] }, { appVersion: 'mcp-v2', exportedAt: '2026-01-01T00:00:00.000Z' })
+    expect((await parseShowFileBundle(await serializeShowFileBundle(bundle.bundle), { acceptV2: true })).show).toEqual(moved)
+    const authored = native.members.filter(member => !member.id.startsWith('__pxlblz_'))
+    expect(authored).toHaveLength(1)
+    const replay = native.replay('fast')
+    const elapsed = (atMs: number) => exportedScalar(replay.advanceTo(atMs, { stepMs: 250, forceFullIntermediateRender: true }).exports, `${authored[0].prefix}_elapsed`, 'fast')
+    const atSixSeconds = elapsed(6_000)
+    expect(elapsed(6_250) - atSixSeconds).toBe(250)
+    console.info(`MCP history Group Layout: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+it.each(['commit', 'cancel'] as const)('keeps private replacement after invalid input, then corrects and %s', async disposition => {
+  const startedAt = performance.now()
+  const solid = showMcpReplacementCases[0]
+  const editor = await boundEditor({ patterns: solid.patterns })
+  try {
+    const before = structuredClone(editor.current())
+    const replacement = solid.buildShow(before.id)
+    const corrected = structuredClone(replacement)
+    corrected.composition.clips[0].appearance!.keys[0].value.opacity = 0.5
+    const begun = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: `Correct then ${disposition}`, idempotency_key: 'begin-correction' })
+    expect(begun.code).toBe('begun')
+    const identity = { binding_id: editor.binding_id, operation_id: begun.operation_id as string }
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'valid', show: replacement })).code).toBe('changed')
+    const invalid = await editor.tool('replace_show', { ...identity, idempotency_key: 'invalid', show: { ...replacement, version: 1 } })
+    expect(invalid).toMatchObject({ code: 'refused', reason: 'invalid-show-record', issues: expect.any(Array) })
+    expect((invalid.issues as unknown[]).length).toBeGreaterThan(0)
+    expect(editor.current()).toEqual(before)
+    expect(editor.readSaved()).toEqual(before)
+    expect(editor.history()).toEqual({ past: [], future: [] })
+    expect(editor.write).not.toHaveBeenCalled()
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'retry-valid', show: replacement })).code).toBe('unchanged')
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'corrected', show: corrected })).code).toBe('changed')
+    if (disposition === 'commit') {
+      expect((await editor.tool('commit_edit', { ...identity, idempotency_key: 'commit-corrected' })).code).toBe('outcome')
+      await vi.waitFor(async () => expect(await editor.tool('get_outcome', identity)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+      const expected = { ...corrected, name: before.name, updatedAt: editor.current().updatedAt }
+      expect(editor.current()).toEqual(expected)
+      expect(editor.readSaved()).toEqual(expected)
+      expect(editor.history()).toEqual({ past: [before], future: [] })
+      expect(editor.write).toHaveBeenCalledTimes(1)
+      const native = await nativeShowV2Artifacts(editor.readSaved(), editor.dependencies, solid.mapPoints)
+      const bundle = buildShowFileBundle(editor.readSaved(), { patterns: editor.dependencies.patterns, maps: [], libraries: [] }, { appVersion: 'mcp-v2', exportedAt: '2026-01-01T00:00:00.000Z' })
+      expect((await parseShowFileBundle(await serializeShowFileBundle(bundle.bundle), { acceptV2: true })).show).toEqual(expected)
+      const replay = native.replay('fast')
+      replay.advanceTo(250, { stepMs: 1, forceFullIntermediateRender: true })
+      expect(encodeFastReplaySnapshot(replay.snapshot()).frame).toEqual([0.5, 0, 0])
+    } else {
+      expect(await editor.tool('cancel_edit', { ...identity, idempotency_key: 'cancel-corrected' })).toMatchObject({ code: 'outcome', receipt: { status: 'cancelled' } })
+      expect(editor.current()).toEqual(before)
+      expect(editor.readSaved()).toEqual(before)
+      expect(editor.history()).toEqual({ past: [], future: [] })
+      expect(editor.write).not.toHaveBeenCalled()
+    }
+    console.info(`MCP history invalid corrected ${disposition}: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+it('refuses a stale replacement after manual Show End admission without changing manual state', async () => {
+  const startedAt = performance.now()
+  const solid = showMcpReplacementCases[0]
+  const editor = await boundEditor({ patterns: solid.patterns })
+  try {
+    const before = structuredClone(editor.current())
+    const replacement = solid.buildShow(before.id)
+    const begun = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Replace before manual edit', idempotency_key: 'begin-stale-replacement' })
+    const identity = { binding_id: editor.binding_id, operation_id: begun.operation_id as string }
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'replace', show: replacement })).code).toBe('changed')
+    const manual = await admitShowV2PilotSetShowEnd({
+      showId: before.id, baseRevision: useShowStore.getState().showRevisions[before.id] ?? 0,
+      capture: editor.capture(), isCurrent: () => true, onAdopted: () => {},
+      intent: { kind: 'set-show-end', showEndMs: 25_000 },
+    })
+    expect(manual.status).toBe('applied')
+    await vi.waitFor(() => expect(editor.write).toHaveBeenCalledTimes(1))
+    const manualRecord = structuredClone(editor.current())
+    const manualSaved = structuredClone(editor.readSaved())
+    const manualHistory = structuredClone(editor.history())
+    expect(manualRecord.composition.showEndMs).toBe(25_000)
+    expect(manualRecord).toEqual(manualSaved)
+    expect(manualHistory).toEqual({ past: [before], future: [] })
+    expect((await editor.tool('commit_edit', { ...identity, idempotency_key: 'commit-stale' })).code).toBe('outcome')
+    expect(await editor.tool('get_outcome', identity)).toMatchObject({ receipt: { status: 'refused', reason: 'revision-conflict' } })
+    expect(editor.current()).toEqual(manualRecord)
+    expect(editor.readSaved()).toEqual(manualSaved)
+    expect(editor.history()).toEqual(manualHistory)
+    expect(editor.write).toHaveBeenCalledTimes(1)
+    console.info(`MCP history stale manual: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+it('replays keyed replacement and commit without duplicating one adoption', async () => {
+  const startedAt = performance.now()
+  const solid = showMcpReplacementCases[0]
+  const editor = await boundEditor({ patterns: solid.patterns })
+  try {
+    const before = structuredClone(editor.current())
+    const replacement = solid.buildShow(before.id)
+    const changedPayload = structuredClone(replacement)
+    changedPayload.composition.clips[0].appearance!.keys[0].value.opacity = 0.5
+    const begun = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Keyed replacement', idempotency_key: 'begin-keyed' })
+    const identity = { binding_id: editor.binding_id, operation_id: begun.operation_id as string }
+    const args = { ...identity, idempotency_key: 'fixed-replace', show: replacement }
+    const first = await editor.tool('replace_show', args)
+    expect(first.code).toBe('changed')
+    expect(await editor.tool('replace_show', args)).toEqual(first)
+    expect(await editor.tool('replace_show', { ...args, show: changedPayload })).toMatchObject({ code: 'identity_conflict' })
+    expect(editor.current()).toEqual(before)
+    expect(editor.history()).toEqual({ past: [], future: [] })
+    expect(editor.write).not.toHaveBeenCalled()
+    const committed = await editor.tool('commit_edit', { ...identity, idempotency_key: 'fixed-commit' })
+    expect(committed.code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', identity)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    const receipt = await editor.tool('get_outcome', identity)
+    const repeated = await editor.tool('commit_edit', { ...identity, idempotency_key: 'fixed-commit' })
+    expect(repeated).toEqual(committed)
+    expect(receipt).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } })
+    const expected = { ...replacement, name: before.name, updatedAt: editor.current().updatedAt }
+    expect(editor.current()).toEqual(expected)
+    expect(editor.readSaved()).toEqual(expected)
+    expect(editor.history()).toEqual({ past: [before], future: [] })
+    expect(editor.write).toHaveBeenCalledTimes(1)
+    console.info(`MCP history keyed retries: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+it('rolls back a failed replacement save to its exact original record and history', async () => {
+  const startedAt = performance.now()
+  const solid = showMcpReplacementCases[0]
+  const editor = await boundEditor({ failSave: true, patterns: solid.patterns })
+  try {
+    const before = structuredClone(editor.current())
+    const replacement = solid.buildShow(before.id)
+    const begun = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Replacement with failed save', idempotency_key: 'begin-rollback' })
+    const identity = { binding_id: editor.binding_id, operation_id: begun.operation_id as string }
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'replace', show: replacement })).code).toBe('changed')
+    expect((await editor.tool('commit_edit', { ...identity, idempotency_key: 'commit' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', identity)).toMatchObject({ receipt: { status: 'applied', settlement: 'rolled-back' } }))
+    expect(editor.current()).toEqual(before)
+    expect(editor.readSaved()).toEqual(before)
+    expect(editor.history()).toEqual({ past: [], future: [] })
+    expect(editor.write).toHaveBeenCalledTimes(1)
+    expect(useShowStore.getState().showV2SaveFailure).toMatchObject({ showId: before.id })
+    console.info(`MCP history replacement rollback: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+it('settles an older failed MCP replacement as superseded by a newer manual save', async () => {
+  const startedAt = performance.now()
+  let rejectFirst: ((reason: Error) => void) | undefined
+  const firstWrite = new Promise<void>((_resolve, reject) => { rejectFirst = reject })
+  void firstWrite.catch(() => {})
+  let attempts = 0
+  const solid = showMcpReplacementCases[0]
+  const editor = await boundEditor({ patterns: solid.patterns, beforeSave: async () => {
+    if (++attempts === 1) await firstWrite
+  } })
+  try {
+    const before = structuredClone(editor.current())
+    const replacement = solid.buildShow(before.id)
+    const begun = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Superseded replacement', idempotency_key: 'begin-superseded' })
+    const identity = { binding_id: editor.binding_id, operation_id: begun.operation_id as string }
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'replace', show: replacement })).code).toBe('changed')
+    expect((await editor.tool('commit_edit', { ...identity, idempotency_key: 'commit' })).code).toBe('outcome')
+    await vi.waitFor(() => expect(editor.write).toHaveBeenCalledTimes(1))
+    const adopted = structuredClone(editor.current())
+    expect(adopted).toEqual({ ...replacement, name: before.name, updatedAt: adopted.updatedAt })
+    expect(editor.readSaved()).toEqual(before)
+    expect(editor.history()).toEqual({ past: [before], future: [] })
+    const newer = structuredClone(adopted)
+    newer.name = 'Newer'
+    const laterSave = useShowStore.getState().updateShowV2Pilot(before.id, newer)
+    const currentNewer = structuredClone(editor.current())
+    expect(currentNewer).toEqual({ ...newer, updatedAt: currentNewer.updatedAt })
+    rejectFirst!(new Error('older failed'))
+    rejectFirst = undefined
+    await laterSave
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', identity)).toMatchObject({ receipt: { status: 'applied', settlement: 'superseded' } }))
+    expect(editor.current()).toEqual(currentNewer)
+    expect(editor.readSaved()).toEqual(currentNewer)
+    expect(editor.history()).toEqual({ past: [before, adopted], future: [] })
+    expect(editor.write).toHaveBeenCalledTimes(2)
+    expect(attempts).toBe(2)
+    expect(useShowStore.getState().showV2SaveFailure).toBeNull()
+    console.info(`MCP history superseded save: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally {
+    rejectFirst?.(new Error('test cleanup'))
+    editor.close()
+  }
 }, 120_000)

@@ -1,0 +1,30 @@
+{
+  "invariants": [
+    "One accepted private operation creates one Show adoption, one Undo preimage, and one provider write regardless of command count.",
+    "A replacement supersedes earlier private commands; later commands apply to its authored record while the connected Show name and store timestamp remain owned by admission.",
+    "Refusal, cancellation, stale revision, and current save failure preserve or restore the complete permitted live, durable, and history state.",
+    "Shared Clip copies reference one Pattern instance until explicit independence; a failed older save cannot roll back a newer accepted record."
+  ],
+  "partitions": [
+    "Accepted replacement followed by command, introduced Clip edit, shared duplicate, independent copy, and Group occurrence move.",
+    "Invalid replacement followed by retry and correction, with commit and cancel dispositions.",
+    "Manual revision conflict, identical and changed keyed delivery, current save failure, and superseded pending failure."
+  ],
+  "sequences": [
+    "set_show_end -> replace_show -> rename_show -> commit_edit.",
+    "replace_show -> commit_edit -> read_show -> update_clips -> commit_edit -> Undo -> Redo.",
+    "replace_show -> duplicate_clip -> update_clips shared control -> make_clip_pattern_independent -> update_clips copied control, with one commit per operation.",
+    "replace_show -> move_group_occurrence across a Layout switch -> commit_edit.",
+    "replace_show valid -> invalid -> identical retry -> corrected -> commit or cancel; private replacement -> manual edit -> stale commit.",
+    "Identical keyed replacement and commit retry; failed save and failed pending save superseded by a queued manual update."
+  ],
+  "oracles": [
+    "Exact complete live and provider records, independently authored expected fields, full history snapshots, write counts, and MCP receipts.",
+    "Serialized .pxlshow parsed through its importer and native .epe replay samples with independently specified red channel values.",
+    "Group definitions, bindings, instance identity, Layout span and Fast elapsed continuity after the switch are structural and runtime oracles; no independent RGB claim for that fixture.",
+    "Fault controls invert stale admission and duplicate write expectations separately, and each named test must fail before restoration."
+  ],
+  "residualGaps": [
+    "Browser UI, physical Pixelblaze hardware, real timer expiry, cross-window ownership, and generated histories remain outside this fixed real-MCP slice."
+  ]
+}
