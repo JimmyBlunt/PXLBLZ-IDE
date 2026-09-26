@@ -35,6 +35,7 @@ import type { ShowRecordV2 } from '../../engine/showCompositionV2'
 import { validateShowRecordV2 } from '../../engine/showCompositionV2'
 import { nativeShowV2Artifacts } from '../../test/showV2IntegratedSequenceHarness'
 import { showMcpReplacementCases } from '../../test/showMcpReplacementFixtures'
+import { encodeFastReplaySnapshot } from '../../engine/fastReplay'
 
 globalThis.Blob = (await import('node:buffer')).Blob as unknown as typeof globalThis.Blob
 
@@ -393,9 +394,9 @@ it.each(showMcpReplacementCases)('qualifies MCP replacement: $name', async repla
       const artifacts = await nativeShowV2Artifacts(saved, editor.dependencies, replacementCase.mapPoints)
       const replay = artifacts.replay('fast')
       for (const sample of replacementCase.samples) {
-        const observed = replay.advanceTo(sample.atMs, { stepMs: 1, forceFullIntermediateRender: true })
-        // FastReplay snapshots expose four-decimal linear RGB channels.
-        expect(Array.from(observed.frame, channel => Math.round(channel * 10_000) / 10_000), `${replacementCase.name} RGB at ${sample.atMs} ms`).toEqual(sample.rgb)
+        replay.advanceTo(sample.atMs, { stepMs: 1, forceFullIntermediateRender: true })
+        // Snapshot JSON rounds linear RGB channels to four decimals.
+        expect(encodeFastReplaySnapshot(replay.snapshot()).frame, `${replacementCase.name} RGB at ${sample.atMs} ms`).toEqual(sample.rgb)
       }
     }
     console.info(`MCP replacement ${replacementCase.name}: ${Math.round(performance.now() - startedAt)} ms`)

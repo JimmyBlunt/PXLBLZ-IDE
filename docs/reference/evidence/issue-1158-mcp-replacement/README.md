@@ -1,6 +1,6 @@
 # Issue #1158: complete Show replacement through MCP
 
-The fixed tests call `read_show`, `begin_edit`, `replace_show`, `commit_edit`, and `get_outcome` through the local Worker MCP endpoint. Each row opens a fresh editor binding and store fixture. Sources are bounded solid-color personal Patterns; expected linear RGB values are handwritten. The first lit sample is at 1 ms because FastReplay has not rendered at `advanceTo(0)`. Frame channels are compared after the four-decimal rounding used by FastReplay snapshots.
+The fixed tests call `read_show`, `begin_edit`, `replace_show`, `commit_edit`, and `get_outcome` through the local Worker MCP endpoint. Each row opens a fresh editor binding and store fixture. Sources are bounded solid-color personal Patterns; expected linear RGB values are handwritten. The first lit sample is at 1 ms because FastReplay has not rendered at `advanceTo(0)`. Frame channels are compared through the snapshot JSON codec's four-decimal linear RGB output.
 
 | Replacement | Named Fast RGB samples (ms) | Oracle | Case wall time | Result |
 | --- | --- | --- | ---: | --- |
@@ -17,7 +17,8 @@ Every row also checks the complete submitted record is preserved, no live record
 
 - Baseline at `2a67f1ff`: 68 tests in 3 files passed in 4.55 s; `/tmp/wrsp-log/20260926T215858-34084-npx-vitest.log` (coordinator run before edits).
 - Clean six-case control: 12 tests in the runtime file passed; `/tmp/wrsp-log/20260926T220850-65465-npx-vitest.log` (`--reporter=verbose`, 5.37 s total). Case wall times above are the test's measured operation time in that run.
-- Final focused scope before commit: 74 tests in 3 files passed; `/tmp/wrsp-log/20260926T220952-68003-npx-vitest.log`, `EXIT:0` (3.46 s total).
+- Earlier focused scope before the snapshot-codec cleanup: 74 tests in 3 files passed; `/tmp/wrsp-log/20260926T220952-68003-npx-vitest.log`, `EXIT:0` (3.46 s total).
+- Snapshot-codec cleanup: build passed (`/tmp/wrsp-log/20260926T221835-79171-npm-run.log`, `EXIT:0`); 74 tests in 3 files passed (`/tmp/wrsp-log/20260926T221901-80391-npx-vitest.log`, `EXIT:0`, 5.37 s total).
 - Temporary output fault: changed solid red's 250 ms expected RGB to green. The focused test failed at the named `solid red throughout RGB at 250 ms` assertion: expected `[0,1,0]`, received `[1,0,0]`; `/tmp/wrsp-log/20260926T220717-61789-npx-vitest.log`, `EXIT:1`.
 - Temporary adoption fault: changed expected accepted history length from one to two. The focused test failed: expected length 2, got 1; `/tmp/wrsp-log/20260926T220803-63908-npx-vitest.log`, `EXIT:1`.
 - Both temporary faults were removed and the source was rebuilt before the clean control.

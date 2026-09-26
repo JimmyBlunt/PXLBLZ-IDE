@@ -15,10 +15,13 @@
     "linearly animated Clip opacity",
     "valid empty composition"
   ],
-  "oracles": {
-    "independent-value": "handwritten four-decimal linear RGB samples from exported .epe FastReplay",
-    "structural": "complete accepted record, source preservation, one provider write and exact Undo preimage",
-    "round-trip": "actual .pxlshow bytes reopened through importer"
-  },
-  "limits": ["Fast mode only", "no browser or hardware", "two temporary assertion faults do not qualify compiler mutations"]
+  "sequences": [
+    "read -> begin -> replace -> commit -> receipt -> saved/reopened export -> playback"
+  ],
+  "oracles": [
+    "independent-value: handwritten snapshot JSON four-decimal linear RGB samples from exported .epe FastReplay",
+    "structural: complete accepted record, source preservation, one provider write and exact Undo preimage",
+    "round-trip: actual .pxlshow bytes reopened through importer"
+  ],
+  "residualGaps": ["Fast mode only", "no browser or hardware", "two temporary assertion faults do not qualify compiler mutations"]
 }
