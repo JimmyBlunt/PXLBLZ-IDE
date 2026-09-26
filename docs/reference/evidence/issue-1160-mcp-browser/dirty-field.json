@@ -1,9 +1,14 @@
 {
   "issue": 1160,
-  "sourceBaseCommit": "c4433f5a",
+  "sourceCommit": "9bee7558f19811aa4a29425ad3a7e49c7b731238",
   "test": "dirty-field",
-  "workerIndex": 0,
-  "workers": 1,
+  "workers": 2,
+  "workerIndex": 1,
+  "parallelIndex": 1,
+  "retry": 0,
+  "repeatEachIndex": 0,
+  "testFilesUncommitted": false,
+  "testFileStatus": [],
   "syntheticAccountConsumption": "one account per test",
   "show": {
     "id": "agent-mcp-1160-dirty",
@@ -30,10 +35,10 @@
   },
   "browserErrors": [],
   "timing": {
-    "setupMs": 3367.764332999999,
-    "bindingMs": 545.1682920000021,
-    "captureMs": 2474.770083000003,
-    "totalMs": 7354.289375
+    "setupMs": 2489.283666,
+    "bindingMs": 554.2841670000003,
+    "captureMs": 1304.4942090000004,
+    "totalMs": 4943.573083
   },
   "transcript": [
     {
@@ -51,7 +56,7 @@
     {
       "name": "begin_edit",
       "code": "begun",
-      "operation_id": "67395530-9fb5-48b4-8518-e41b22f825d9"
+      "operation_id": "c54661ad-1368-4f4c-8905-f054f232469a"
     },
     {
       "name": "replace_show",
@@ -80,7 +85,7 @@
     {
       "name": "begin_edit",
       "code": "begun",
-      "operation_id": "3949e238-d46a-4645-9b61-ddb1831daf33"
+      "operation_id": "7da2cb78-24a6-4aa9-8551-c33efd3c834d"
     },
     {
       "name": "replace_show",

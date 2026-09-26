@@ -1,9 +1,14 @@
 {
   "issue": 1160,
-  "sourceBaseCommit": "c4433f5a",
+  "sourceCommit": "9bee7558f19811aa4a29425ad3a7e49c7b731238",
   "test": "adoption",
+  "workers": 2,
   "workerIndex": 0,
-  "workers": 1,
+  "parallelIndex": 0,
+  "retry": 0,
+  "repeatEachIndex": 0,
+  "testFilesUncommitted": false,
+  "testFileStatus": [],
   "syntheticAccountConsumption": "one account per test",
   "show": {
     "id": "agent-mcp-1160-adoption",
@@ -30,10 +35,10 @@
   },
   "browserErrors": [],
   "timing": {
-    "setupMs": 2112.323792,
-    "bindingMs": 628.8698750000003,
-    "captureMs": 21130.840084,
-    "totalMs": 27590.097542
+    "setupMs": 2489.283375,
+    "bindingMs": 563.9947079999997,
+    "captureMs": 12441.079041,
+    "totalMs": 17109.238332999998
   },
   "transcript": [
     {
@@ -51,7 +56,7 @@
     {
       "name": "begin_edit",
       "code": "begun",
-      "operation_id": "55217d44-8dc5-4de4-b167-8257bdca4f25"
+      "operation_id": "3630619c-6234-47af-b3f3-741d67252f09"
     },
     {
       "name": "replace_show",
@@ -80,7 +85,7 @@
     {
       "name": "begin_edit",
       "code": "begun",
-      "operation_id": "9f733ad8-1684-41db-a7ac-391e0b447792"
+      "operation_id": "0f2ad7c7-332c-4091-b2ff-f4a93badef88"
     },
     {
       "name": "replace_show",
