@@ -937,3 +937,196 @@ it('settles an older failed MCP replacement as superseded by a newer manual save
     editor.close()
   }
 }, 120_000)
+
+type InvalidReplacementCase = {
+  name: string
+  fixture: 'solid' | 'adjacent' | 'group'
+  mutate: (show: ShowRecordV2) => void
+  reason: string
+  issue: { code: string; path?: string }
+}
+
+const invalidReplacementCases: InvalidReplacementCase[] = [
+  { name: 'different Show identity', fixture: 'solid', mutate: show => { show.id = 'another-show' }, reason: 'show-identity-mismatch', issue: { code: 'show-identity-mismatch' } },
+  { name: 'duplicate Layer identity', fixture: 'solid', mutate: show => { show.composition.layers.push({ ...show.composition.layers[0], rank: 1 }) }, reason: 'invalid-show-record', issue: { code: 'duplicate-id', path: 'composition.layers[1].id' } },
+  { name: 'missing Clip instance', fixture: 'solid', mutate: show => { show.composition.clips[0].instanceId = 'missing-instance' }, reason: 'invalid-show-record', issue: { code: 'missing-reference', path: 'composition.clips[0].instanceId' } },
+  { name: 'missing Clip Layer', fixture: 'solid', mutate: show => { show.composition.clips[0].layerId = 'missing-layer' }, reason: 'invalid-show-record', issue: { code: 'missing-reference', path: 'composition.clips[0].layerId' } },
+  { name: 'missing Clip Zone', fixture: 'solid', mutate: show => { show.composition.clips[0].zoneId = 'missing-zone' }, reason: 'invalid-show-record', issue: { code: 'missing-reference', path: 'composition.clips[0].zoneId' } },
+  { name: 'missing Layout reference', fixture: 'solid', mutate: show => { show.composition.layoutOccurrences[0].layoutId = 'missing-layout' }, reason: 'invalid-show-record', issue: { code: 'missing-reference', path: 'composition.layoutOccurrences[0].layoutId' } },
+  { name: 'zero Clip duration', fixture: 'solid', mutate: show => { show.composition.clips[0].durationMs = 0 }, reason: 'invalid-show-record', issue: { code: 'schema', path: '/composition/clips/0/durationMs' } },
+  { name: 'Clip beyond Show End', fixture: 'solid', mutate: show => { show.composition.clips[0].durationMs = 1_001 }, reason: 'invalid-show-record', issue: { code: 'out-of-bounds', path: 'composition.clips[0]' } },
+  { name: 'adjacent Clips overlap', fixture: 'adjacent', mutate: show => { show.composition.clips[1].startMs = 499; show.composition.clips[1].durationMs = 501; show.composition.clips[1].appearance!.keys[0].timeMs = 499 }, reason: 'invalid-show-record', issue: { code: 'overlap', path: 'composition.clips[1]' } },
+  { name: 'Layout leaves uncovered time', fixture: 'solid', mutate: show => { show.composition.layoutOccurrences[0].durationMs = 999 }, reason: 'invalid-show-record', issue: { code: 'invalid-layout-coverage', path: 'composition.layoutOccurrences' } },
+  { name: 'missing Group definition', fixture: 'group', mutate: show => { show.composition.groupOccurrences[0].definitionId = 'missing-definition' }, reason: 'invalid-show-record', issue: { code: 'missing-reference', path: 'composition.groupOccurrences[0].definitionId' } },
+  { name: 'missing Group Layout occurrence', fixture: 'group', mutate: show => { show.composition.groupOccurrences[0].layoutOccurrenceId = 'missing-occurrence' }, reason: 'invalid-show-record', issue: { code: 'missing-reference', path: 'composition.groupOccurrences[0].layoutOccurrenceId' } },
+]
+
+it.each(invalidReplacementCases)('refuses $name and retains the private replacement for correction', async rejectionCase => {
+  const startedAt = performance.now()
+  const solid = showMcpReplacementCases[0]
+  const adjacent = showMcpReplacementCases[1]
+  const group = rejectionCase.fixture === 'group' ? showV2LayoutEditorFixture() : undefined
+  const editor = await boundEditor({ patterns: [...adjacent.patterns, ...(group?.dependencies.patterns ?? [])] })
+  try {
+    const before = structuredClone(editor.current())
+    const replacement = solid.buildShow(before.id)
+    const replacementInput = structuredClone(replacement)
+    const invalid = rejectionCase.fixture === 'group'
+      ? structuredClone(group!.record)
+      : (rejectionCase.fixture === 'adjacent' ? adjacent : solid).buildShow(before.id)
+    invalid.id = before.id
+    rejectionCase.mutate(invalid)
+    const invalidInput = structuredClone(invalid)
+    const corrected = structuredClone(replacement)
+    corrected.composition.clips[0].appearance!.keys[0].value.opacity = 0.5
+    expect(validateShowRecordV2(replacement)).toEqual([])
+    const begun = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: rejectionCase.name, idempotency_key: 'begin-invalid-case' })
+    expect(begun.code).toBe('begun')
+    const identity = { binding_id: editor.binding_id, operation_id: begun.operation_id as string }
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'accept-a', show: replacement })).code).toBe('changed')
+    const refused = await editor.tool('replace_show', { ...identity, idempotency_key: 'refuse-invalid', show: invalid })
+    expect(refused).toMatchObject({ code: 'refused', reason: rejectionCase.reason, issues: expect.arrayContaining([expect.objectContaining(rejectionCase.issue)]) })
+    expect(replacement).toEqual(replacementInput)
+    expect(invalid).toEqual(invalidInput)
+    expect(editor.current()).toEqual(before)
+    expect(editor.readSaved()).toEqual(before)
+    expect(editor.history()).toEqual({ past: [], future: [] })
+    expect(editor.write).not.toHaveBeenCalled()
+    // An identical replacement is the observable proof that the refused input did not replace A privately.
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'retry-a', show: replacement })).code).toBe('unchanged')
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'correct-opacity', show: corrected })).code).toBe('changed')
+    expect((await editor.tool('commit_edit', { ...identity, idempotency_key: 'commit-corrected' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', identity)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    const expected = { ...corrected, name: before.name, updatedAt: editor.current().updatedAt }
+    expect(editor.current()).toEqual(expected)
+    expect(editor.readSaved()).toEqual(expected)
+    expect(editor.history()).toEqual({ past: [before], future: [] })
+    expect(editor.write).toHaveBeenCalledTimes(1)
+    expect(editor.write.mock.calls[0]).toEqual([before.id, expected])
+    expect(replacement).toEqual(replacementInput)
+    expect(invalid).toEqual(invalidInput)
+    expect(validateShowRecordV2(editor.readSaved())).toEqual([])
+    const bundle = buildShowFileBundle(editor.readSaved(), { patterns: editor.dependencies.patterns, maps: [], libraries: [] }, { appVersion: 'mcp-v2', exportedAt: '2026-01-01T00:00:00.000Z' })
+    expect((await parseShowFileBundle(await serializeShowFileBundle(bundle.bundle), { acceptV2: true })).show).toEqual(expected)
+    if (rejectionCase.name === 'different Show identity') {
+      const native = await nativeShowV2Artifacts(editor.readSaved(), editor.dependencies, solid.mapPoints)
+      const replay = native.replay('fast')
+      replay.advanceTo(250, { stepMs: 1, forceFullIntermediateRender: true })
+      expect(encodeFastReplaySnapshot(replay.snapshot()).frame).toEqual([0.5, 0, 0])
+    }
+    console.info(`MCP invalid ${rejectionCase.name}: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+it.each([
+  { name: 'negative integer instance offset', change: (show: ShowRecordV2) => { show.composition.patternInstances[0].time.timeOffsetMs = -1 } },
+  { name: 'dormant Marker past Show End', change: (show: ShowRecordV2) => { show.composition.markers.push({ id: 'dormant', timeMs: 1_001, name: 'Dormant' }) } },
+])('accepts $name and reopens its rendered artifact', async boundaryCase => {
+  const startedAt = performance.now()
+  const solid = showMcpReplacementCases[0]
+  const editor = await boundEditor({ patterns: solid.patterns })
+  try {
+    const before = structuredClone(editor.current())
+    const replacement = solid.buildShow(before.id)
+    boundaryCase.change(replacement)
+    const input = structuredClone(replacement)
+    expect(validateShowRecordV2(replacement)).toEqual([])
+    const begun = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: boundaryCase.name, idempotency_key: 'begin-boundary' })
+    expect(begun.code).toBe('begun')
+    const identity = { binding_id: editor.binding_id, operation_id: begun.operation_id as string }
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'replace-boundary', show: replacement })).code).toBe('changed')
+    expect((await editor.tool('commit_edit', { ...identity, idempotency_key: 'commit-boundary' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', identity)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    const expected = { ...input, name: before.name, updatedAt: editor.current().updatedAt }
+    expect(editor.current()).toEqual(expected)
+    expect(editor.readSaved()).toEqual(expected)
+    expect(editor.history()).toEqual({ past: [before], future: [] })
+    expect(editor.write).toHaveBeenCalledTimes(1)
+    expect(editor.write.mock.calls[0]).toEqual([before.id, expected])
+    expect(replacement).toEqual(input)
+    expect(validateShowRecordV2(expected)).toEqual([])
+    const bundle = buildShowFileBundle(editor.readSaved(), { patterns: editor.dependencies.patterns, maps: [], libraries: [] }, { appVersion: 'mcp-v2', exportedAt: '2026-01-01T00:00:00.000Z' })
+    expect((await parseShowFileBundle(await serializeShowFileBundle(bundle.bundle), { acceptV2: true })).show).toEqual(expected)
+    const native = await nativeShowV2Artifacts(editor.readSaved(), editor.dependencies, solid.mapPoints)
+    const replay = native.replay('fast')
+    replay.advanceTo(999, { stepMs: 1, forceFullIntermediateRender: true })
+    expect(encodeFastReplaySnapshot(replay.snapshot()).frame).toEqual([1, 0, 0])
+    console.info(`MCP legal boundary ${boundaryCase.name}: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+it('supersedes Group edits with an adjacent-color replacement and preserves one Undo/Redo group', async () => {
+  const startedAt = performance.now()
+  const group = showV2LayoutEditorFixture()
+  const adjacent = showMcpReplacementCases[1]
+  const editor = await boundEditor({ patterns: [...adjacent.patterns, ...group.dependencies.patterns] })
+  try {
+    const before = structuredClone(editor.current())
+    const replacementA = structuredClone(group.record)
+    replacementA.id = before.id
+    const inputA = structuredClone(replacementA)
+    const replacementB = adjacent.buildShow(before.id)
+    const inputB = structuredClone(replacementB)
+    const formerGroupClipId = replacementA.composition.groupDefinitions[0].clips[0].id
+    expect(formerGroupClipId).toBeTruthy()
+    expect(replacementA.composition.groupDefinitions[0].clips.some(clip => clip.id === formerGroupClipId)).toBe(true)
+    expect(replacementB.composition.clips.some(clip => clip.id === formerGroupClipId)).toBe(false)
+    expect(validateShowRecordV2(replacementA)).toEqual([])
+    expect(validateShowRecordV2(replacementB)).toEqual([])
+    const begun = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Supersede held Group with colors', idempotency_key: 'begin-supersede' })
+    expect(begun.code).toBe('begun')
+    const identity = { binding_id: editor.binding_id, operation_id: begun.operation_id as string }
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'replace-group-a', show: replacementA })).code).toBe('changed')
+    const occurrence = replacementA.composition.groupOccurrences[0]
+    expect(occurrence.startMs).toBe(2_000)
+    expect((await editor.tool('move_group_occurrence', { ...identity, idempotency_key: 'move-group-a', group_occurrence_id: occurrence.id, start_ms: 2_500 })).code).toBe('changed')
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'replace-colors-b', show: replacementB })).code).toBe('changed')
+    const refused = await editor.tool('remove_clips', { ...identity, idempotency_key: 'remove-former-group-clip', clip_ids: [formerGroupClipId] })
+    expect(refused).toMatchObject({ code: 'refused', issues: expect.arrayContaining([expect.objectContaining({ code: 'unknown-id' })]) })
+    expect((await editor.tool('update_clips', { ...identity, idempotency_key: 'dim-green', updates: [{ clip_id: 'green-clip', appearance: { apply: { scope: 'whole-clip' }, opacity: 0.5 } }] })).code).toBe('changed')
+    expect(editor.current()).toEqual(before)
+    expect(editor.readSaved()).toEqual(before)
+    expect(editor.history()).toEqual({ past: [], future: [] })
+    expect(editor.write).not.toHaveBeenCalled()
+    expect(replacementA).toEqual(inputA)
+    expect(replacementB).toEqual(inputB)
+    expect((await editor.tool('commit_edit', { ...identity, idempotency_key: 'commit-supersede' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', identity)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    const expected = structuredClone(inputB)
+    expected.name = before.name
+    expected.updatedAt = editor.current().updatedAt
+    expected.composition.clips[1].appearance!.keys[0].value.opacity = 0.5
+    expect(editor.current()).toEqual(expected)
+    expect(editor.readSaved()).toEqual(expected)
+    expect(editor.history()).toEqual({ past: [before], future: [] })
+    expect(editor.write).toHaveBeenCalledTimes(1)
+    expect(editor.write.mock.calls[0]).toEqual([before.id, expected])
+    expect(expected.composition.groupDefinitions).toEqual([])
+    expect(expected.composition.groupOccurrences).toEqual([])
+    expect(expected.composition.layoutOccurrences).toEqual(inputB.composition.layoutOccurrences)
+    expect(validateShowRecordV2(expected)).toEqual([])
+    const bundle = buildShowFileBundle(editor.readSaved(), { patterns: editor.dependencies.patterns, maps: [], libraries: [] }, { appVersion: 'mcp-v2', exportedAt: '2026-01-01T00:00:00.000Z' })
+    expect((await parseShowFileBundle(await serializeShowFileBundle(bundle.bundle), { acceptV2: true })).show).toEqual(expected)
+    const native = await nativeShowV2Artifacts(editor.readSaved(), editor.dependencies, adjacent.mapPoints)
+    const replay = native.replay('fast')
+    for (const [atMs, rgb] of [[499, [1, 0, 0]], [500, [0, 0.5, 0]], [999, [0, 0.5, 0]]] as const) {
+      replay.advanceTo(atMs, { stepMs: 1, forceFullIntermediateRender: true })
+      expect(encodeFastReplaySnapshot(replay.snapshot()).frame).toEqual(rgb)
+    }
+    expect(await useShowStore.getState().undoShowV2Pilot(before.id)).toBe(true)
+    const undone = structuredClone(editor.current())
+    expect(undone).toEqual({ ...before, updatedAt: undone.updatedAt })
+    expect(editor.readSaved()).toEqual(undone)
+    expect(editor.history()).toEqual({ past: [], future: [expected] })
+    expect(editor.write).toHaveBeenCalledTimes(2)
+    expect(await useShowStore.getState().redoShowV2Pilot(before.id)).toBe(true)
+    const redone = structuredClone(editor.current())
+    expect(redone).toEqual({ ...expected, updatedAt: redone.updatedAt })
+    expect(editor.readSaved()).toEqual(redone)
+    expect(editor.history()).toEqual({ past: [undone], future: [] })
+    expect(editor.write).toHaveBeenCalledTimes(3)
+    expect(replacementA).toEqual(inputA)
+    expect(replacementB).toEqual(inputB)
+    console.info(`MCP superseded Group Undo Redo: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)

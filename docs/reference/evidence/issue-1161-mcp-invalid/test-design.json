@@ -1,0 +1,33 @@
+{
+  "invariants": [
+    "replace_show refuses invalid identity, structure, references, timing, overlap, and coverage without replacing the retained private candidate",
+    "refusal does not mutate either input, the complete live or saved Show, history, or provider writes",
+    "a corrected candidate is adopted once, saved once, and reopened as the exact expected Show record",
+    "later replace_show supersedes all earlier private commands; one commit produces one history entry and Undo/Redo restore full snapshots"
+  ],
+  "partitions": [
+    "identity: different Show id",
+    "unique identity: duplicate Layer id with distinct rank",
+    "references: missing Clip instance, Layer, Zone; Layout; Group definition and Layout occurrence",
+    "timing: zero Clip duration rejected by schema; Clip end beyond Show End; adjacent Clip overlap; Layout coverage short by one millisecond",
+    "legal boundaries: instance timeOffsetMs -1; dormant Marker at 1001 ms after a 1000 ms Show End"
+  ],
+  "sequences": [
+    "For each of 12 rejections: begin, replace valid solid A, refuse invalid candidate, retry identical A unchanged, replace corrected A at 0.5 opacity, commit once, reopen .pxlshow",
+    "For each of two legal boundaries: replace, commit, reopen native artifacts, render red at 999 ms",
+    "Replace held Group A, move its occurrence from 2000 to 2500 ms, replace with adjacent-color B, refuse removal of former Group Clip, dim green Clip, commit once, Undo, Redo"
+  ],
+  "oracles": [
+    "MCP structured refusal reason and specific issue code/path where defined",
+    "deep equality of both caller inputs, complete live and saved records, history snapshots, and provider write arguments/count",
+    "raw exported .pxlshow reopened through parseShowFileBundle for each rejection and legal boundary; native .pxlshow/.epe qualification for representative rendering cases",
+    "four-decimal FastReplay RGB: corrected solid [0.5,0,0] at 250 ms; legal solid [1,0,0] at 999 ms; superseding B [1,0,0] at 499 ms and [0,0.5,0] at 500 and 999 ms",
+    "oracle fault control: temporary expected [0.4,0,0] at 250 ms failed against actual [0.5,0,0], then restored and passed"
+  ],
+  "residualGaps": [
+    "Miniflare and the real editor admission/store path do not execute a Chromium UI or physical Pixelblaze",
+    "The table asserts intended diagnostics, not an exhaustive list of incidental diagnostics",
+    "Malformed logical routing belongs to later authoring admission and is not claimed as a replace_show refusal",
+    "Coordinator owns candidate review and committed-tip runner suites"
+  ]
+}
