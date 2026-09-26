@@ -1,0 +1,24 @@
+{
+  "issue": 1158,
+  "boundary": "real local MCP replacement to saved Show, reopened .pxlshow, and executed exported .epe",
+  "invariants": [
+    "private replacement preserves caller input and has no live/history/provider effect before commit",
+    "accepted changed operation retains connected id/name, makes one write and one Undo entry",
+    "saved authored record equals replacement except connected name and store ordering stamp",
+    "empty authorable Show saves and reopens while Stage preparation reports empty"
+  ],
+  "partitions": [
+    "one solid Clip",
+    "adjacent Clips around 500 ms",
+    "overlapping Layers at half opacity",
+    "two logical Zones with fixed 2D sample points",
+    "linearly animated Clip opacity",
+    "valid empty composition"
+  ],
+  "oracles": {
+    "independent-value": "handwritten four-decimal linear RGB samples from exported .epe FastReplay",
+    "structural": "complete accepted record, source preservation, one provider write and exact Undo preimage",
+    "round-trip": "actual .pxlshow bytes reopened through importer"
+  },
+  "limits": ["Fast mode only", "no browser or hardware", "two temporary assertion faults do not qualify compiler mutations"]
+}

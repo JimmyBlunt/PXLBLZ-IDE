@@ -33,6 +33,8 @@ import { STOCK_SHOW_IDS } from '../../pixelblaze/stock/showIds'
 import { SHOW_COMMANDS_V2 } from '../../engine/showCommandsV2/registry'
 import type { ShowRecordV2 } from '../../engine/showCompositionV2'
 import { validateShowRecordV2 } from '../../engine/showCompositionV2'
+import { nativeShowV2Artifacts } from '../../test/showV2IntegratedSequenceHarness'
+import { showMcpReplacementCases } from '../../test/showMcpReplacementFixtures'
 
 globalThis.Blob = (await import('node:buffer')).Blob as unknown as typeof globalThis.Blob
 
@@ -271,9 +273,10 @@ it('runs the #1029 sequence over a v2 record through the real MCP path and reope
 
 /** One live binding over a v2 record, with the store and provider behind it. */
 let identityIndex = 0
-async function boundEditor(options: { failSave?: boolean } = {}) {
+async function boundEditor(options: { failSave?: boolean; patterns?: Array<typeof PATTERN> } = {}) {
   runtime = startRuntime()
   const token = await authorize()
+  const patterns = [PATTERN, ...(options.patterns ?? [])]
   // A distinct Show identity per test: the store's durable v2 baseline is
   // module state keyed by Show id, so a reused id would let one test's saved
   // record become the next test's rollback target.
@@ -289,9 +292,9 @@ async function boundEditor(options: { failSave?: boolean } = {}) {
     ...getPersonalContentProvider(), id: 'mcp-v2-failure', replaceShowV2: write,
     listShowDocumentsV2: async () => [structuredClone(saved)],
   })
-  usePatternStore.setState({ userPatterns: [PATTERN], patternsLoaded: true } as never)
+  usePatternStore.setState({ userPatterns: patterns, patternsLoaded: true } as never)
   useShowStore.setState({ showV2Pilots: { [record.id]: record }, showV2Histories: { [record.id]: { past: [], future: [] } } })
-  const dependencies = { patterns: [PATTERN], maps: [], libraries: [], profiles: [], stageMap: null }
+  const dependencies = { patterns, maps: [], libraries: [], profiles: [], stageMap: null }
   let capture = captureShowStageEditV2(record, dependencies)
   const unsubscribe = useShowStore.subscribe(() => {
     const current = useShowStore.getState().showV2Pilots[record.id]
@@ -328,7 +331,7 @@ async function boundEditor(options: { failSave?: boolean } = {}) {
   expect(read).toMatchObject({ code: 'read' })
   expect((read.show as ShowRecordV2).version).toBe(2)
   return {
-    record, write, admission, session, tool,
+    record, write, admission, session, tool, dependencies,
     capture: () => capture,
     binding_id: connected.binding_id as string,
     readSaved: () => saved,
@@ -337,6 +340,67 @@ async function boundEditor(options: { failSave?: boolean } = {}) {
     history: () => useShowStore.getState().showV2Histories[record.id],
   }
 }
+
+it.each(showMcpReplacementCases)('qualifies MCP replacement: $name', async replacementCase => {
+  const startedAt = performance.now()
+  const editor = await boundEditor({ patterns: replacementCase.patterns })
+  try {
+    const read = await editor.tool('read_show', { binding_id: editor.binding_id })
+    expect(read).toMatchObject({ code: 'read', show: editor.record })
+    const before = structuredClone(editor.current())
+    const replacement = replacementCase.buildShow(before.id)
+    const inputBefore = structuredClone(replacement)
+    expect(replacement.id).toBe(before.id)
+    expect(replacement.name).not.toBe(before.name)
+    expect(validateShowRecordV2(replacement)).toEqual([])
+
+    const begun = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: replacementCase.name, idempotency_key: 'begin' })
+    expect(begun.code).toBe('begun')
+    const identity = { binding_id: editor.binding_id, operation_id: begun.operation_id as string }
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'replace', show: replacement })).code).toBe('changed')
+    expect(replacement).toEqual(inputBefore)
+    expect(editor.current()).toEqual(before)
+    expect(editor.readSaved()).toEqual(before)
+    expect(editor.history().past).toEqual([])
+    expect(editor.write).not.toHaveBeenCalled()
+
+    expect((await editor.tool('commit_edit', { ...identity, idempotency_key: 'commit' })).code).toBe('outcome')
+    await vi.waitFor(async () => {
+      expect(await editor.tool('get_outcome', identity)).toMatchObject({ code: 'outcome', receipt: { status: 'applied', settlement: 'saved' } })
+    })
+    expect(editor.write).toHaveBeenCalledTimes(1)
+    expect(editor.write.mock.calls[0][0]).toBe(before.id)
+    expect(editor.history().past).toEqual([before])
+    expect(editor.history().future).toEqual([])
+    const current = editor.current()
+    const saved = editor.readSaved()
+    const expected = { ...inputBefore, name: before.name, updatedAt: current.updatedAt }
+    expect(current).toEqual(expected)
+    expect(saved).toEqual(expected)
+    expect(current.id).toBe(before.id)
+    expect(current.name).toBe(before.name)
+    expect(current.updatedAt).toBeGreaterThan(before.updatedAt)
+    expect(replacement).toEqual(inputBefore)
+    expect(validateShowRecordV2(saved)).toEqual([])
+
+    if (replacementCase.samples.length === 0) {
+      const bundle = buildShowFileBundle(saved, { patterns: editor.dependencies.patterns, maps: [], libraries: [] }, { appVersion: 'mcp-v2', exportedAt: '2026-01-01T00:00:00.000Z' })
+      const reopened = await parseShowFileBundle(await serializeShowFileBundle(bundle.bundle), { acceptV2: true })
+      expect(reopened.version).toBe(2)
+      expect(reopened.show).toEqual(saved)
+      expect(prepareShowStageV2(saved, editor.dependencies)).toEqual({ status: 'empty', record: saved })
+    } else {
+      const artifacts = await nativeShowV2Artifacts(saved, editor.dependencies, replacementCase.mapPoints)
+      const replay = artifacts.replay('fast')
+      for (const sample of replacementCase.samples) {
+        const observed = replay.advanceTo(sample.atMs, { stepMs: 1, forceFullIntermediateRender: true })
+        // FastReplay snapshots expose four-decimal linear RGB channels.
+        expect(Array.from(observed.frame, channel => Math.round(channel * 10_000) / 10_000), `${replacementCase.name} RGB at ${sample.atMs} ms`).toEqual(sample.rgb)
+      }
+    }
+    console.info(`MCP replacement ${replacementCase.name}: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
 
 it('answers a duplicate begin key with the original operation and never opens a second candidate', async () => {
   const editor = await boundEditor()
