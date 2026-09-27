@@ -41,3 +41,9 @@ The local corrective runs used two workers per shard, no retry, and real authent
 | 3/3 | 664, 707, 761 (3/3) | 24.9 s | `/tmp/wrsp-log/20260927T012126-60536-npm-run.log` (`EXIT:0`) |
 
 The `check:e2e-coverage` and `check:e2e-locators` commands passed; `npm run build` passed. The focused runs do not replace the seven exact-tip runner suite results.
+
+## Remote shard authorization repair
+
+Review of `6c77ff2b..69b9448b` found that `qualifiedRemoteExecution` validated each new MCP shard job, but the suite-lock wrapper's closed label map rejected all three before executing the command. The wrapper now maps only `test:e2e:shows:mcp-1`, `-2`, and `-3` to their corresponding `e2e-shows-mcp-1`, `-2`, and `-3` suites in the `playwright` group. The exact suite/group guard remains unchanged: newly configured valid jobs run, while a different shard label or `vitest` group refuses without executing the child. Unqualified runs still take and release the repository lock for all three labels.
+
+The focused wrapper test ran with `WRSP_HOST_VITEST_WORKERS=2`. Before the map change, the new tests failed 3/3 at the child-execution oracle, while four existing tests passed (2.22 s; `/tmp/wrsp-log/20260927T013626-28241-env-WRSP-HOST-VITEST-WORKERS-2.log`, `EXIT:1`). After the change, all seven tests passed in 2.91 s (`/tmp/wrsp-log/20260927T013943-48628-env-WRSP-HOST-VITEST-WORKERS-2.log`, `EXIT:0`). The mapped pre-commit gate first timed out two shard cases at Vitest's 5 s default under its 18-file load (`/tmp/wrsp-log/20260927T013816-38511-git-commit.log`, `EXIT:1`); the slowest case took 6.7 s, so those cases now use a 20 s timeout. The earlier three local authenticated shard passes remain valid; the coordinator's seven exact-tip runner results are still pending.

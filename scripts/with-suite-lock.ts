@@ -160,6 +160,9 @@ async function main(): Promise<void> {
       'test:e2e': { suite: 'e2e-public', group: 'playwright' },
       'test:e2e:auth-smoke': { suite: 'e2e-auth-smoke', group: 'playwright' },
       'test:e2e:shows': { suite: 'e2e-shows', group: 'playwright' },
+      'test:e2e:shows:mcp-1': { suite: 'e2e-shows-mcp-1', group: 'playwright' },
+      'test:e2e:shows:mcp-2': { suite: 'e2e-shows-mcp-2', group: 'playwright' },
+      'test:e2e:shows:mcp-3': { suite: 'e2e-shows-mcp-3', group: 'playwright' },
     }
     if (expected[label]?.suite !== qualified.suite || expected[label]?.group !== qualified.group) {
       throw new Error('Qualified remote job does not authorize this suite label.')
