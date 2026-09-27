@@ -1,0 +1,32 @@
+{
+  "invariants": [
+    "Oversized Show and HTTP requests leave the complete current and durable Show, history, and provider write count unchanged.",
+    "A refused commit with unavailable authoring dependencies has no partial adoption or durable write.",
+    "An accepted replacement preserves the connected Show id and name and creates exactly one saved record and one history entry.",
+    "A Portable render3D-only Pattern remains authorable while route delivery refuses the compiled artifact."
+  ],
+  "partitions": [
+    "Compact Show JSON at 60000 versus 60001 UTF-8 bytes with ASCII name padding.",
+    "Compact Show JSON at 60000 versus 60001 UTF-8 bytes with multibyte name padding and JS string length below 60000.",
+    "Authenticated MCP request body at 67584 versus 67585 bytes, separate from Show JSON size.",
+    "Structurally valid Show with missing Control metadata versus unavailable Library reference.",
+    "Authoring admission of a Portable render3D-only Pattern versus route artifact delivery."
+  ],
+  "sequences": [
+    "Begin edit, accept replacement A, accept changed half-opacity B, refuse oversized B, retry B with a fresh key, commit, reopen, and replay.",
+    "Accept a private candidate, send exact and oversized raw MCP read requests, read again, retry the candidate with a fresh key, commit, and reopen.",
+    "Accept a structurally valid invalid-authoring candidate, refuse at commit, verify preservation, begin a new edit, correct to half-opacity red, commit, and reopen.",
+    "Accept and save a Portable render3D-only candidate, reopen, prepare Stage, and request route delivery."
+  ],
+  "oracles": [
+    "HTTP status and JSON-RPC structuredContent at the authenticated Worker endpoint.",
+    "Complete current and recording-provider records, full history, and provider write count.",
+    "Serialized .pxlshow bytes reopened through parseShowFileBundle with exact expected authored record.",
+    "FastReplay linear RGB snapshot equals literal half-red [0.5, 0, 0] at 250 ms.",
+    "Route artifact result refuses with a message containing 'defines only render3D.'"
+  ],
+  "residualGaps": [
+    "No browser or hardware execution in this focused runtime slice.",
+    "The coordinator owns exact-tip full runner suites and the broader #1163 campaign."
+  ]
+}

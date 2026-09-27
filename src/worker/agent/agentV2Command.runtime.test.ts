@@ -23,6 +23,7 @@ import { createAgentEditorAdmission } from '../../agent/editorAdmission'
 import { convertShowRecordV1ToV2 } from '../../engine/showRecordV1ToV2'
 import { convertibleV1Show } from '../../test/showV2TracerFixture'
 import { captureShowStageEditV2, prepareShowStageV2 } from '../../engine/showPreparedStageV2'
+import { buildShowV2RouteArtifacts } from '../../engine/showV2RouteDelivery'
 import { buildShowEpeExportV2 } from '../../engine/showEpeExportV2'
 import { buildShowFileBundle, parseShowFileBundle, serializeShowFileBundle } from '../../engine/showFileBundle'
 import { getPersonalContentProvider, resetPersonalContentProvider, setPersonalContentProvider } from '../../engine/personalContentProvider'
@@ -317,12 +318,13 @@ async function boundEditor(options: { failSave?: boolean; patterns?: ReadonlyArr
       return Response.json(await response.json())
     }) as unknown as typeof fetch,
   })
+  const rawMcp = (body: string) => runtime.dispatchFetch('https://app.test/mcp', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json, text/event-stream', 'Content-Type': 'application/json' },
+    body,
+  })
   const tool = async (name: string, args: object = {}) => {
-    const response = await runtime.dispatchFetch('https://app.test/mcp', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json, text/event-stream', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
-    })
+    const response = await rawMcp(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }))
     return (await response.json() as { result: { structuredContent: Record<string, unknown> } }).result.structuredContent
   }
   await session.ready
@@ -334,7 +336,7 @@ async function boundEditor(options: { failSave?: boolean; patterns?: ReadonlyArr
   expect(read).toMatchObject({ code: 'read' })
   expect((read.show as ShowRecordV2).version).toBe(2)
   return {
-    record, write, admission, session, tool, dependencies,
+    record, write, admission, session, tool, rawMcp, dependencies,
     capture: () => capture,
     binding_id: connected.binding_id as string,
     readSaved: () => saved,
@@ -1128,5 +1130,182 @@ it('supersedes Group edits with an adjacent-color replacement and preserves one 
     expect(replacementA).toEqual(inputA)
     expect(replacementB).toEqual(inputB)
     console.info(`MCP superseded Group Undo Redo: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+function expectUnchangedAfterRefusal(editor: Awaited<ReturnType<typeof boundEditor>>, before: ShowRecordV2) {
+  expect(editor.current()).toEqual(before)
+  expect(editor.readSaved()).toEqual(before)
+  expect(editor.history()).toEqual({ past: [], future: [] })
+  expect(editor.write).toHaveBeenCalledTimes(0)
+}
+
+async function expectOneSavedReplacement(editor: Awaited<ReturnType<typeof boundEditor>>, before: ShowRecordV2, authored: ShowRecordV2) {
+  const expected = structuredClone(authored)
+  expected.id = before.id
+  expected.name = before.name
+  expected.updatedAt = editor.current().updatedAt
+  expect(editor.current()).toEqual(expected)
+  expect(editor.readSaved()).toEqual(expected)
+  expect(editor.history()).toEqual({ past: [before], future: [] })
+  expect(editor.write).toHaveBeenCalledTimes(1)
+  expect(editor.write.mock.calls[0]).toEqual([before.id, expected])
+  const bundle = buildShowFileBundle(editor.readSaved(), { patterns: editor.dependencies.patterns, maps: [], libraries: [] }, { appVersion: 'mcp-v2', exportedAt: '2026-01-01T00:00:00.000Z' })
+  const reopened = await parseShowFileBundle(await serializeShowFileBundle(bundle.bundle), { acceptV2: true })
+  expect(reopened.version).toBe(2)
+  expect(reopened.show).toEqual(expected)
+  return expected
+}
+
+it.each(['ASCII', 'UTF-8'] as const)('accepts an exact 60000-byte %s Show, refuses 60001 bytes, and keeps private correction', async alphabet => {
+  const startedAt = performance.now()
+  const solid = showMcpReplacementCases[0]
+  const editor = await boundEditor({ patterns: solid.patterns })
+  try {
+    const before = structuredClone(editor.current())
+    const a = solid.buildShow(before.id)
+    const b = structuredClone(a)
+    b.composition.clips[0].appearance!.keys[0].value.opacity = 0.5
+    b.name = ''
+    const encoder = new TextEncoder()
+    const available = 60_000 - encoder.encode(JSON.stringify(b)).byteLength
+    expect(available).toBeGreaterThan(0)
+    b.name = alphabet === 'ASCII' ? 'a'.repeat(available) : 'é'.repeat(Math.floor(available / 2)) + 'a'.repeat(available % 2)
+    expect(encoder.encode(JSON.stringify(b)).byteLength).toBe(60_000)
+    if (alphabet === 'UTF-8') expect(JSON.stringify(b).length).toBeLessThan(60_000)
+    expect(validateShowRecordV2(b)).toEqual([])
+    const oversized = structuredClone(b)
+    oversized.name += 'a'
+    expect(encoder.encode(JSON.stringify(oversized)).byteLength).toBe(60_001)
+    if (alphabet === 'UTF-8') expect(JSON.stringify(oversized).length).toBeLessThan(60_000)
+
+    const begun = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Bounded replacement', idempotency_key: 'begin-boundary' })
+    expect(begun.code).toBe('begun')
+    const identity = { binding_id: editor.binding_id, operation_id: begun.operation_id as string }
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'replace-a', show: a })).code).toBe('changed')
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'replace-b', show: b })).code).toBe('changed')
+    expectUnchangedAfterRefusal(editor, before)
+    expect(await editor.tool('replace_show', { ...identity, idempotency_key: 'oversized', show: oversized })).toMatchObject({ code: 'refused', reason: 'show-too-large' })
+    expectUnchangedAfterRefusal(editor, before)
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'retry-b', show: b })).code).toBe('unchanged')
+    expect((await editor.tool('commit_edit', { ...identity, idempotency_key: 'commit-b' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', identity)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    await expectOneSavedReplacement(editor, before, b)
+    const native = await nativeShowV2Artifacts(editor.readSaved(), editor.dependencies, solid.mapPoints)
+    const replay = native.replay('fast')
+    replay.advanceTo(250, { stepMs: 1, forceFullIntermediateRender: true })
+    expect(encodeFastReplaySnapshot(replay.snapshot()).frame).toEqual([0.5, 0, 0])
+    console.info(`MCP 60000-byte ${alphabet}: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+it('admits a 67584-byte authenticated MCP request and refuses 67585 without clearing a private Show', async () => {
+  const startedAt = performance.now()
+  const solid = showMcpReplacementCases[0]
+  const editor = await boundEditor({ patterns: solid.patterns })
+  try {
+    const before = structuredClone(editor.current())
+    const replacement = solid.buildShow(before.id)
+    const begun = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Retain private Show across HTTP body refusal', idempotency_key: 'begin-http-boundary' })
+    const identity = { binding_id: editor.binding_id, operation_id: begun.operation_id as string }
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'replace-http', show: replacement })).code).toBe('changed')
+    const request = JSON.stringify({ jsonrpc: '2.0', id: 37, method: 'tools/call', params: { name: 'read_show', arguments: { binding_id: editor.binding_id } } })
+    const encoder = new TextEncoder()
+    const atLimit = request + ' '.repeat(67_584 - encoder.encode(request).byteLength)
+    expect(encoder.encode(atLimit).byteLength).toBe(67_584)
+    const accepted = await editor.rawMcp(atLimit)
+    expect(accepted.status).toBe(200)
+    expect(await accepted.json()).toMatchObject({ result: { structuredContent: { code: 'read', show: before } } })
+    const overLimit = atLimit + ' '
+    expect(encoder.encode(overLimit).byteLength).toBe(67_585)
+    const refused = await editor.rawMcp(overLimit)
+    expect(refused.status).toBe(413)
+    expect(await refused.json()).toEqual({ error: 'invalid_request' })
+    expectUnchangedAfterRefusal(editor, before)
+    expect(await editor.tool('read_show', { binding_id: editor.binding_id })).toMatchObject({ code: 'read', show: before })
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'retry-http', show: replacement })).code).toBe('unchanged')
+    expect((await editor.tool('commit_edit', { ...identity, idempotency_key: 'commit-http' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', identity)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    await expectOneSavedReplacement(editor, before, replacement)
+    console.info(`MCP 67584-byte HTTP: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+const MISSING_LIBRARY_PATTERN = {
+  ...PATTERN, id: 'mcp-missing-library', name: 'Missing Library',
+  src: 'export function render2D(index, x, y) { Missing.paint(index) }',
+}
+
+it.each([
+  { name: 'missing Control metadata', diagnostic: 'control-metadata-unavailable', pattern: undefined },
+  { name: 'missing Library reference', diagnostic: 'library-reference-unavailable', pattern: MISSING_LIBRARY_PATTERN },
+])('refuses $name at commit, preserves the Show, and saves a corrected edit', async ({ diagnostic, pattern }) => {
+  const startedAt = performance.now()
+  const solid = showMcpReplacementCases[0]
+  const editor = await boundEditor({ patterns: [...solid.patterns, ...(pattern ? [pattern] : [])] })
+  try {
+    const before = structuredClone(editor.current())
+    const invalid = solid.buildShow(before.id)
+    if (pattern) {
+      invalid.composition.patternInstances[0].pattern = { kind: 'user', id: pattern.id }
+      invalid.composition.patternInstances[0].patternName = pattern.name
+    } else {
+      invalid.composition.patternInstances[0].controlTargets = { sliderMissing: 0.5 }
+    }
+    expect(validateShowRecordV2(invalid)).toEqual([])
+    const begun = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Check authoring dependency', idempotency_key: 'begin-invalid-authoring' })
+    const identity = { binding_id: editor.binding_id, operation_id: begun.operation_id as string }
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'replace-invalid-authoring', show: invalid })).code).toBe('changed')
+    expect((await editor.tool('commit_edit', { ...identity, idempotency_key: 'commit-invalid-authoring' })).code).toBe('outcome')
+    expect(await editor.tool('get_outcome', identity)).toMatchObject({
+      code: 'outcome', receipt: {
+        status: 'refused', reason: 'invalid-candidate',
+        diagnostic: { stage: 'authoring', issues: expect.arrayContaining([expect.objectContaining({ code: diagnostic })]) },
+      },
+    })
+    expectUnchangedAfterRefusal(editor, before)
+
+    expect(await editor.tool('read_show', { binding_id: editor.binding_id })).toMatchObject({ code: 'read', show: before })
+    const corrected = solid.buildShow(before.id)
+    corrected.composition.clips[0].appearance!.keys[0].value.opacity = 0.5
+    const next = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Correct authoring dependency', idempotency_key: 'begin-correct-authoring' })
+    expect(next.code).toBe('begun')
+    const nextIdentity = { binding_id: editor.binding_id, operation_id: next.operation_id as string }
+    expect((await editor.tool('replace_show', { ...nextIdentity, idempotency_key: 'replace-correct-authoring', show: corrected })).code).toBe('changed')
+    expect((await editor.tool('commit_edit', { ...nextIdentity, idempotency_key: 'commit-correct-authoring' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', nextIdentity)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    await expectOneSavedReplacement(editor, before, corrected)
+    console.info(`MCP ${diagnostic} correction: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+it('saves a Portable Show with a render3D-only Pattern but refuses route delivery', async () => {
+  const startedAt = performance.now()
+  const solid = showMcpReplacementCases[0]
+  const volume = {
+    ...PATTERN, id: 'mcp-volume', name: 'Volume',
+    src: 'export var gain = .4\nexport function sliderGain(v) { gain = v }\nexport function render3D(index, x, y, z) { rgb(gain, y, z) }',
+  }
+  const editor = await boundEditor({ patterns: [...solid.patterns, volume] })
+  try {
+    const before = structuredClone(editor.current())
+    const replacement = solid.buildShow(before.id)
+    replacement.composition.patternInstances[0].pattern = { kind: 'user', id: volume.id }
+    replacement.composition.patternInstances[0].patternName = volume.name
+    expect(validateShowRecordV2(replacement)).toEqual([])
+    const begun = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: 'Author a volume Pattern', idempotency_key: 'begin-volume' })
+    const identity = { binding_id: editor.binding_id, operation_id: begun.operation_id as string }
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'replace-volume', show: replacement })).code).toBe('changed')
+    expect((await editor.tool('commit_edit', { ...identity, idempotency_key: 'commit-volume' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', identity)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    await expectOneSavedReplacement(editor, before, replacement)
+    const prepared = prepareShowStageV2(editor.readSaved(), editor.dependencies)
+    expect(prepared.status).toBe('ready')
+    if (prepared.status !== 'ready') throw new Error(JSON.stringify(prepared))
+    expect(buildShowV2RouteArtifacts(prepared.bundle)).toEqual({ status: 'refused', message: expect.stringContaining('defines only render3D.') })
+    expect(editor.current()).toEqual(editor.readSaved())
+    expect(editor.history()).toEqual({ past: [before], future: [] })
+    expect(editor.write).toHaveBeenCalledTimes(1)
+    console.info(`MCP Portable render3D delivery: ${Math.round(performance.now() - startedAt)} ms`)
   } finally { editor.close() }
 }, 120_000)
