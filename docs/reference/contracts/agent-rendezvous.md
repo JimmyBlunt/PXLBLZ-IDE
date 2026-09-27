@@ -98,7 +98,10 @@ matching local binding and keeps the registration. Both retain authenticated
 account, origin and capability checks but permit cleanup after capability or
 service configuration changes, Show deletion, or request throttling. Cleanup
 responses disclose no connection metadata. Sign-out must request leave before
-losing its cookie; an unreachable tab is eventually retired by stale expiry.
+losing its cookie.
+The browser sends `leave` with fetch `keepalive` so its small cleanup POST can
+survive ordinary page teardown when transport is available; an unreachable tab
+still retires by stale expiry.
 Another window cannot disconnect the owner. Local Forget synchronously retires
 browser work, then atomically ends its exact owning external binding and resolves
 the trusted grant identity inside the account owner. Grant revocation follows

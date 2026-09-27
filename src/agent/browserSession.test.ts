@@ -216,6 +216,7 @@ function registrationHarness({ holdRegister = true } = {}) {
   const answers: Array<() => void> = []
   const aborted: string[] = []
   const calls: Record<string, unknown>[] = []
+  const requestOptions: Array<{ type: string; keepalive: boolean | undefined }> = []
   const state = { holdRegister }
   let issued = 0
   // A fixed clock: these partitions are about close ordering, never about TTL.
@@ -227,6 +228,7 @@ function registrationHarness({ holdRegister = true } = {}) {
   const fetcher = ((_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const body = JSON.parse(init?.body as string) as Record<string, string>
     calls.push(body)
+    requestOptions.push({ type: body.type, keepalive: init?.keepalive })
     const signal = init?.signal ?? undefined
     const rejectOnAbort = (type: string, reject: (reason: Error) => void) =>
       signal?.addEventListener('abort', () => { aborted.push(type); reject(new Error('aborted')) }, { once: true })
@@ -246,7 +248,7 @@ function registrationHarness({ holdRegister = true } = {}) {
     const admission = { sessionId, available: () => true, onClose: vi.fn(() => () => {}), recordVersion: 1 }
     return createAgentBrowserSession({ admission: admission as unknown as ReturnType<typeof createAgentEditorAdmission>, showId: 'show', fetch: fetcher })
   }
-  return { answers, aborted, calls, mount, state, registrations: () => rendezvous.registrations }
+  return { answers, aborted, calls, requestOptions, mount, state, registrations: () => rendezvous.registrations }
 }
 const bodiesOfType = (calls: Record<string, unknown>[], type: string) => calls.filter(call => call.type === type)
 
@@ -261,6 +263,8 @@ describe('registration lifetime across close', () => {
     harness.answers.shift()!()
 
     await vi.waitFor(() => expect(bodiesOfType(harness.calls, 'leave')).toEqual([{ type: 'leave', registrationId: 'registration-1', sessionId: 'session-one', showId: 'show' }]))
+    expect(harness.requestOptions).toContainEqual({ type: 'leave', keepalive: true })
+    expect(harness.requestOptions).toContainEqual({ type: 'register', keepalive: undefined })
     expect(harness.registrations().length).toBe(0)
   })
 
@@ -287,6 +291,9 @@ describe('registration lifetime across close', () => {
     session.close()
     await vi.waitFor(() => expect(harness.registrations().length).toBe(0))
     expect(bodiesOfType(harness.calls, 'leave')).toHaveLength(1)
+    expect(harness.requestOptions).toContainEqual({ type: 'leave', keepalive: true })
+    expect(harness.requestOptions).toContainEqual({ type: 'register', keepalive: undefined })
+    expect(harness.requestOptions).toContainEqual({ type: 'receive', keepalive: undefined })
   })
 
   it('does not accumulate registrations across repeated mounts closed before acknowledgement', async () => {

@@ -556,3 +556,247 @@ test('navigation retires an uncommitted MCP replacement without saving either Sh
       }, browserErrors, 1162)
   } finally { await client.close() }
 })
+
+test('dirty duration Escape releases a waiting MCP replacement as one history step (#1165)', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const started = performance.now()
+  const browserErrors: string[] = []
+  page.on('pageerror', error => browserErrors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error') browserErrors.push(message.text()) })
+  const original = await seedSolid(page, 'agent-mcp-1165-escape', 'MCP Escape wait proof')
+  await seedPatterns(page)
+  await openEditor(page, original)
+  const harness = captureHarness(page, testInfo, 'escape')
+  await harness.install()
+  const bindingStart = performance.now()
+  const client = await boundClient(page, original)
+  const bindingMs = performance.now() - bindingStart
+  try {
+    const before = await assertStored(page, original, original)
+    assertSamples(await harness.capture('red-before-250', 250), [red, red])
+    const candidate = greenShow(original.id)
+    expect((await client.tool('read_show', { binding_id: client.bindingId })).code).toBe('read')
+    const begun = await client.tool('begin_edit', { binding_id: client.bindingId, intent: 'Replace red after duration Escape', idempotency_key: randomUUID() })
+    expect(begun.code).toBe('begun')
+    expect(typeof begun.operation_id).toBe('string')
+    const identity = { binding_id: client.bindingId, operation_id: begun.operation_id as string }
+    expect((await client.tool('replace_show', { ...identity, idempotency_key: randomUUID(), show: candidate })).code).toBe('changed')
+    const redClip = page.getByRole('button', { name: 'Select Solid red', exact: true })
+    await redClip.click()
+    const duration = page.getByRole('textbox', { name: 'Duration seconds exact time' })
+    await duration.fill('0.75')
+    await expect(duration).toBeFocused()
+    expect((await client.tool('commit_edit', { ...identity, idempotency_key: randomUUID() })).code).toBe('outcome')
+    await expect.poll(async () => (await client.tool('get_outcome', identity)).receipt).toMatchObject({ status: 'waiting' })
+    await expect(duration).toBeFocused()
+    expect(await findStoredShowV2(page, original.id)).toEqual(before)
+    await duration.press('Escape')
+    await expect.poll(async () => (await client.tool('get_outcome', identity)).receipt).toMatchObject({ status: 'applied', settlement: 'saved' })
+    await assertStored(page, original, candidate)
+    await expect(duration).not.toBeVisible()
+    await expect(redClip).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Select Solid green', exact: true })).toBeVisible()
+    assertSamples(await harness.capture('green-after-escape-250', 250), [green, green])
+    await page.getByRole('button', { name: 'Undo Show edit' }).click()
+    await assertStored(page, original, original)
+    await expect(redClip).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Select Solid green', exact: true })).toHaveCount(0)
+    assertSamples(await harness.capture('red-after-undo-250', 250), [red, red])
+    await writeEvidence('escape-release', testInfo, original, harness, client,
+      { setupMs: bindingStart - started, bindingMs, captureMs: harness.captureMs(), totalMs: performance.now() - started }, {
+        waiting: { focusedField: 'Duration seconds exact time', draft: '0.75', durableUnchanged: true },
+        outcome: { status: 'applied', settlement: 'saved', release: 'Escape', undoRestoredOriginal: true },
+      }, browserErrors, 1165)
+  } finally { await client.close() }
+})
+
+test('cancel_edit during dirty-input wait preserves red and permits a fresh replacement (#1165)', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const started = performance.now()
+  const browserErrors: string[] = []
+  page.on('pageerror', error => browserErrors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error') browserErrors.push(message.text()) })
+  const original = await seedSolid(page, 'agent-mcp-1165-cancel', 'MCP cancel wait proof')
+  await seedPatterns(page)
+  await openEditor(page, original)
+  const harness = captureHarness(page, testInfo, 'cancel')
+  await harness.install()
+  const bindingStart = performance.now()
+  const client = await boundClient(page, original)
+  const bindingMs = performance.now() - bindingStart
+  try {
+    const before = await assertStored(page, original, original)
+    const candidate = greenShow(original.id)
+    expect((await client.tool('read_show', { binding_id: client.bindingId })).code).toBe('read')
+    const begun = await client.tool('begin_edit', { binding_id: client.bindingId, intent: 'Cancel green candidate during duration wait', idempotency_key: randomUUID() })
+    expect(begun.code).toBe('begun')
+    expect(typeof begun.operation_id).toBe('string')
+    const identity = { binding_id: client.bindingId, operation_id: begun.operation_id as string }
+    expect((await client.tool('replace_show', { ...identity, idempotency_key: randomUUID(), show: candidate })).code).toBe('changed')
+    await page.getByRole('button', { name: 'Select Solid red', exact: true }).click()
+    const duration = page.getByRole('textbox', { name: 'Duration seconds exact time' })
+    await duration.fill('0.75')
+    await expect(duration).toBeFocused()
+    expect((await client.tool('commit_edit', { ...identity, idempotency_key: randomUUID() })).code).toBe('outcome')
+    await expect.poll(async () => (await client.tool('get_outcome', identity)).receipt).toMatchObject({ status: 'waiting' })
+    expect(await findStoredShowV2(page, original.id)).toEqual(before)
+    const cancelled = await client.tool('cancel_edit', { ...identity, idempotency_key: randomUUID() })
+    expect(cancelled).toMatchObject({ code: 'outcome', receipt: { status: 'cancelled' } })
+    await duration.press('Escape')
+    await expect.poll(async () => (await client.tool('get_outcome', identity)).receipt).toMatchObject({ status: 'cancelled' })
+    await assertStored(page, original, original)
+    await expect(page.getByRole('button', { name: 'Select Solid red', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Select Solid green', exact: true })).toHaveCount(0)
+    assertSamples(await harness.capture('red-after-cancel-250', 250), [red, red])
+    const freshIdentity = await replace(client, candidate, 'Fresh green replacement after cancellation')
+    await assertStored(page, original, candidate)
+    await expect(page.getByRole('button', { name: 'Select Solid green', exact: true })).toBeVisible()
+    assertSamples(await harness.capture('green-after-fresh-250', 250), [green, green])
+    expect((await client.tool('get_outcome', identity)).receipt).toMatchObject({ status: 'cancelled' })
+    await writeEvidence('cancel-wait', testInfo, original, harness, client,
+      { setupMs: bindingStart - started, bindingMs, captureMs: harness.captureMs(), totalMs: performance.now() - started }, {
+        cancelledOperationId: identity.operation_id, freshOperationId: freshIdentity.operation_id,
+        assertions: ['cancelled receipt remains terminal after draft Escape and a fresh saved replacement', 'complete red then green records and literal Stage pixels'],
+      }, browserErrors, 1165)
+  } finally { await client.close() }
+})
+
+test('textbox Undo leaves MCP history to the timeline (#1165)', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const started = performance.now()
+  const browserErrors: string[] = []
+  page.on('pageerror', error => browserErrors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error') browserErrors.push(message.text()) })
+  const original = await seedSolid(page, 'agent-mcp-1165-textbox-undo', 'MCP textbox history proof')
+  await seedPatterns(page)
+  await openEditor(page, original)
+  const harness = captureHarness(page, testInfo, 'textbox-undo')
+  await harness.install()
+  const bindingStart = performance.now()
+  const client = await boundClient(page, original)
+  const bindingMs = performance.now() - bindingStart
+  try {
+    const candidate = greenShow(original.id)
+    await replace(client, candidate, 'Replace red with green before textbox Undo')
+    const before = await assertStored(page, original, candidate)
+    const greenClip = page.getByRole('button', { name: 'Select Solid green', exact: true })
+    await greenClip.click()
+    const duration = page.getByRole('textbox', { name: 'Duration seconds exact time' })
+    await duration.fill('0.75')
+    await expect(duration).toBeFocused()
+    await duration.press('ControlOrMeta+z')
+    expect(await findStoredShowV2(page, original.id)).toEqual(before)
+    await duration.press('Escape')
+    await assertStored(page, original, candidate)
+    assertSamples(await harness.capture('green-after-textbox-undo-250', 250), [green, green])
+    if (await duration.isVisible()) await greenClip.click()
+    await expect(duration).not.toBeVisible()
+    await expect(greenClip).toBeFocused()
+    await greenClip.press('ControlOrMeta+z')
+    await assertStored(page, original, original)
+    await expect(greenClip).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Select Solid red', exact: true })).toBeVisible()
+    assertSamples(await harness.capture('red-after-timeline-undo-250', 250), [red, red])
+    await writeEvidence('textbox-history', testInfo, original, harness, client,
+      { setupMs: bindingStart - started, bindingMs, captureMs: harness.captureMs(), totalMs: performance.now() - started }, {
+        assertions: ['textbox Undo did not consume document history', 'Escape discarded the duration draft', 'timeline Undo restored the complete original red record'],
+      }, browserErrors, 1165)
+  } finally { await client.close() }
+})
+
+test('timeline Undo supersedes a private MCP candidate without truncating Redo (#1165)', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const started = performance.now()
+  const browserErrors: string[] = []
+  page.on('pageerror', error => browserErrors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error') browserErrors.push(message.text()) })
+  const original = await seedSolid(page, 'agent-mcp-1165-undo-private', 'MCP stale candidate proof')
+  await seedPatterns(page)
+  await openEditor(page, original)
+  const harness = captureHarness(page, testInfo, 'undo-private')
+  await harness.install()
+  const bindingStart = performance.now()
+  const client = await boundClient(page, original)
+  const bindingMs = performance.now() - bindingStart
+  try {
+    const greenShowRecord = greenShow(original.id)
+    await replace(client, greenShowRecord, 'Replace red with green before private edit')
+    await assertStored(page, original, greenShowRecord)
+    const halfOpacity = structuredClone(greenShowRecord)
+    halfOpacity.composition.clips[0].appearance.keys[0].value.opacity = 0.5
+    expect((await client.tool('read_show', { binding_id: client.bindingId })).code).toBe('read')
+    const begun = await client.tool('begin_edit', { binding_id: client.bindingId, intent: 'Private half-opacity green candidate', idempotency_key: randomUUID() })
+    expect(begun.code).toBe('begun')
+    expect(typeof begun.operation_id).toBe('string')
+    const identity = { binding_id: client.bindingId, operation_id: begun.operation_id as string }
+    expect((await client.tool('replace_show', { ...identity, idempotency_key: randomUUID(), show: halfOpacity })).code).toBe('changed')
+    const greenClip = page.getByRole('button', { name: 'Select Solid green', exact: true })
+    await greenClip.click()
+    const duration = page.getByRole('textbox', { name: 'Duration seconds exact time' })
+    await expect(duration).toBeVisible()
+    await greenClip.click()
+    await expect(duration).not.toBeVisible()
+    await expect(greenClip).toBeFocused()
+    await greenClip.press('ControlOrMeta+z')
+    await assertStored(page, original, original)
+    const rejected = await client.tool('commit_edit', { ...identity, idempotency_key: randomUUID() })
+    expect(rejected.code).toBe('outcome')
+    await expect.poll(async () => (await client.tool('get_outcome', identity)).receipt).toMatchObject({ status: 'refused', reason: 'revision-conflict' })
+    await assertStored(page, original, original)
+    await expect(greenClip).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Select Solid red', exact: true })).toBeVisible()
+    assertSamples(await harness.capture('red-after-refusal-250', 250), [red, red])
+    await page.getByRole('button', { name: 'Redo Show edit' }).click()
+    await assertStored(page, original, greenShowRecord)
+    await expect(greenClip).toBeVisible()
+    assertSamples(await harness.capture('green-after-redo-250', 250), [green, green])
+    await writeEvidence('undo-private', testInfo, original, harness, client,
+      { setupMs: bindingStart - started, bindingMs, captureMs: harness.captureMs(), totalMs: performance.now() - started }, {
+        refusal: { status: 'refused', reason: 'revision-conflict', rejectedOpacity: 0.5 },
+        assertions: ['complete red record and pixels survive rejected private commit', 'Redo restores the saved full-green record'],
+      }, browserErrors, 1165)
+  } finally { await client.close() }
+})
+
+test('reload retires a private MCP candidate and its old binding (#1165)', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const started = performance.now()
+  const browserErrors: string[] = []
+  page.on('pageerror', error => browserErrors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error') browserErrors.push(message.text()) })
+  const original = await seedSolid(page, 'agent-mcp-1165-reload', 'MCP reload retirement proof')
+  await seedPatterns(page)
+  await openEditor(page, original)
+  const harness = captureHarness(page, testInfo, 'reload-private')
+  await harness.install()
+  const bindingStart = performance.now()
+  const client = await boundClient(page, original)
+  const bindingMs = performance.now() - bindingStart
+  try {
+    const before = await assertStored(page, original, original)
+    const candidate = greenShow(original.id)
+    expect((await client.tool('read_show', { binding_id: client.bindingId })).code).toBe('read')
+    const begun = await client.tool('begin_edit', { binding_id: client.bindingId, intent: 'Private green candidate retired by reload', idempotency_key: randomUUID() })
+    expect(begun.code).toBe('begun')
+    expect(typeof begun.operation_id).toBe('string')
+    const identity = { binding_id: client.bindingId, operation_id: begun.operation_id as string }
+    expect((await client.tool('replace_show', { ...identity, idempotency_key: randomUUID(), show: candidate })).code).toBe('changed')
+    expect(await findStoredShowV2(page, original.id)).toEqual(before)
+    await page.reload()
+    await expect(page.getByRole('treeitem', { name: original.name, exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByTestId('show-stage-canvas-frame')).toHaveAttribute('aria-busy', 'false')
+    await page.waitForFunction(id => (window as CaptureWindow).__pxlblzShow?.showId === id, original.id)
+    await page.evaluate(settings => (window as CaptureWindow).__pxlblzShow!.setPreview(settings), previewSettings)
+    await expect.poll(async () => (await client.tool('read_show', { binding_id: client.bindingId })).code).toBe('no_live_editor')
+    expect((await client.tool('commit_edit', { ...identity, idempotency_key: randomUUID() })).code).toBe('no_live_editor')
+    await assertStored(page, original, original)
+    await expect(page.getByRole('button', { name: 'Select Solid red', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Select Solid green', exact: true })).toHaveCount(0)
+    assertSamples(await harness.capture('red-after-reload-250', 250), [red, red])
+    await writeEvidence('reload-retirement', testInfo, original, harness, client,
+      { setupMs: bindingStart - started, bindingMs, captureMs: harness.captureMs(), totalMs: performance.now() - started }, {
+        refusals: { read: 'no_live_editor', commit: 'no_live_editor' },
+        assertions: ['complete original red record survived reload', 'private green Clip never appeared', 'literal red Stage pixels at 250 ms'],
+      }, browserErrors, 1165)
+  } finally { await client.close() }
+})

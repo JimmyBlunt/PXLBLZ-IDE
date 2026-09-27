@@ -34,14 +34,14 @@ export function createAgentBrowserSession({ admission, showId, fetch: fetcher = 
   const listeners = new Set<(event: AgentBrowserSessionEvent) => void>()
   const abort = new AbortController()
   const emit = (event: AgentBrowserSessionEvent) => { for (const listener of listeners) listener(event) }
-  const post = async (body: object, signal?: AbortSignal): Promise<ChannelReply> => {
+  const post = async (body: object, signal?: AbortSignal, keepalive = false): Promise<ChannelReply> => {
     const requestAbort = new AbortController()
     const cancel = () => { clearTimeout(timer); requestAbort.abort() }
     const timer = setTimeout(cancel, 35_000)
     signal?.addEventListener('abort', cancel, { once: true })
     if (signal?.aborted) cancel()
     try {
-      const response = await fetcher('/api/agent/channel', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: requestAbort.signal })
+      const response = await fetcher('/api/agent/channel', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: requestAbort.signal, ...(keepalive ? { keepalive: true } : {}) })
       return await response.json() as ChannelReply
     } finally { clearTimeout(timer); signal?.removeEventListener('abort', cancel) }
   }
@@ -151,7 +151,7 @@ export function createAgentBrowserSession({ admission, showId, fetch: fetcher = 
   const close = () => {
     if (closed) return
     closed = true; if (heartbeat !== undefined) clearInterval(heartbeat); ++controlVersion; retire(); abort.abort(); stopAdmission(); listeners.clear()
-    if (windowIdentity) void post({ type: 'leave', ...windowIdentity }).catch(() => {})
+    if (windowIdentity) void post({ type: 'leave', ...windowIdentity }, undefined, true).catch(() => {})
   }
   const ready = (async () => {
     if (!admission.available()) return undefined
@@ -166,7 +166,7 @@ export function createAgentBrowserSession({ admission, showId, fetch: fetcher = 
         return undefined
       }
       const identity = { registrationId: result.registrationId, sessionId: admission.sessionId, showId }
-      if (closed) { void post({ type: 'leave', ...identity }).catch(() => {}); return undefined }
+      if (closed) { void post({ type: 'leave', ...identity }, undefined, true).catch(() => {}); return undefined }
       windowIdentity = identity
       if (result.connection) { lastSeenConnection = JSON.stringify(result.connection); update(result.connection) }
       heartbeat = setInterval(async () => {
