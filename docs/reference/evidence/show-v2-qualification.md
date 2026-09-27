@@ -56,7 +56,7 @@ No domain term or authored Show semantics changed, so CONTEXT.md requires no cha
 
 The broadest cheap loop is `npx vitest run src/worker/agent/agentV2Command.runtime.test.ts`: 48 cases passed in 12.55 seconds in the #1167 focused run. Its five richer sequences took 2.94 seconds when selected alone. The #1166 browser creation pair passed with two workers in about 17 seconds, including save, reload, rendering and both exported downloads. The #1165 five-case browser pass took 26.8 seconds. These are observed development timings, not performance thresholds.
 
-The required browser partition is `npm run test:e2e:shows:mcp-1`, `npm run test:e2e:shows:mcp-2`, and `npm run test:e2e:shows:mcp-3`; all three must pass. Each owns an isolated real Worker runtime. Existing runtime reservation and Playwright sharding provide isolation; the campaign adds no general testing framework. The ordinary Show browser suite remains `npm run test:e2e:shows`.
+The required browser partition is `npm run test:e2e:shows:mcp-1`, `npm run test:e2e:shows:mcp-2`, and `npm run test:e2e:shows:mcp-3`; all three must pass. Each owns an isolated real Worker runtime. Cases run with two workers inside each shard. The existing runner browser group serializes shard jobs; isolated shards do not imply simultaneous remote execution. Existing runtime reservation and Playwright sharding provide isolation; the campaign adds no general testing framework. The ordinary Show browser suite remains `npm run test:e2e:shows`.
 
 Evidence and precise oracles:
 
@@ -66,3 +66,5 @@ Evidence and precise oracles:
 - [Invalid whole-Show partitions](issue-1161-mcp-invalid/README.md) and [selection/navigation](issue-1162-mcp-interactions/README.md).
 
 The wrong-image and wrong-midpoint controls deliberately fail against actual captured or replayed output, establishing sensitivity to a wrong visual result. The reload fix has red/green request-lifetime tests for both registration-close orderings. No new transformation engine was introduced, so no additional mutation campaign is claimed.
+
+The [combined review design](show-v2-qualification-test-design.json) records the invariants and oracles of the final lifecycle, creation and sequence changes.
