@@ -12,7 +12,7 @@ The recording editor now uses a distinct `mcp-v2-personal-<n>` identity per bind
 | Shared, independent, empty | Four Clip spans preserve two runtime identities; final deletion reopens as empty; Undo restores content | 290 ms |
 | Missing Stage map | Structurally valid replacement refuses at normalized final admission; a corrected new edit saves | 254 ms |
 
-The Effect case intentionally has two writes and two history entries because `add_clip_effect` exposes its generated identity through the saved public record. The other accepted single-edit cases require one write and one history entry. Every private candidate and refusal checks complete live and durable records, full history, and write count before commit.
+The Effect case intentionally has two writes and two history entries because `add_clip_effect` exposes its generated identity through the saved public record. The other accepted single-edit cases require one write and one history entry. The cases check private-candidate isolation and refusal preservation against live and durable records and write counts; accepted commits also check the complete history.
 
 Focused proof: `wrsp-log npm run build` passed (`/tmp/wrsp-log/20260927T011842-51363-npm-run.log`, `EXIT:0`). The requested `wrsp-log npx vitest run src/worker/agent/agentV2Command.runtime.test.ts` passed 48/48 tests in one file, 12.55 s total and 11.36 s test execution (`/tmp/wrsp-log/20260927T011905-52245-npx-vitest.log`, `EXIT:0`). A verbose five-case timing pass passed 5/5 in 2.94 s total and 1.63 s test execution (`/tmp/wrsp-log/20260927T011928-53408-npx-vitest.log`, `EXIT:0`); its case times are above.
 
