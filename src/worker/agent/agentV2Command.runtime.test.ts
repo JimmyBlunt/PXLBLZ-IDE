@@ -106,6 +106,7 @@ function startRuntime() {
       SESSION_SECRET: 'v2-command-secret', AGENT_SERVICE_ENABLED: '1', AGENT_ACCOUNT_ALLOWLIST: 'github:123',
       AGENT_OAUTH_ORIGIN: 'https://app.test', AGENT_OAUTH_CLIENTS: JSON.stringify([client]),
     },
+    d1Databases: ['PXLBLZ_DB'],
     durableObjects: {
       AGENT_ACCOUNTS: { className: 'AgentAccount', useSQLite: true },
       AGENT_OAUTH_AUTHORITY: { className: 'AgentOAuthAuthority', useSQLite: true },
@@ -278,12 +279,15 @@ it('runs the #1029 sequence over a v2 record through the real MCP path and reope
 let identityIndex = 0
 async function boundEditor(options: { failSave?: boolean; patterns?: ReadonlyArray<typeof PATTERN>; beforeSave?: (id: string, record: ShowRecordV2) => Promise<void> } = {}) {
   runtime = startRuntime()
-  const token = await authorize()
   const patterns = [PATTERN, ...(options.patterns ?? [])]
   // A distinct Show identity per test: the store's durable v2 baseline is
   // module state keyed by Show id, so a reused id would let one test's saved
   // record become the next test's rollback target.
-  const record = v2Record(STOCK_SHOW_IDS[(identityIndex += 1) % STOCK_SHOW_IDS.length])
+  const record = v2Record(`mcp-v2-personal-${++identityIndex}`)
+  const db = await runtime.getD1Database('PXLBLZ_DB')
+  await db.exec('CREATE TABLE personal_shows (user_id TEXT, id TEXT, name TEXT)')
+  await db.prepare('INSERT INTO personal_shows (user_id, id, name) VALUES (?, ?, ?)').bind('github:123', record.id, record.name).run()
+  const token = await authorize()
   window.history.replaceState(null, '', `/studio/shows/${record.id}`)
   useShowStore.setState(showInitialState)
   let saved = structuredClone(record)
@@ -1307,5 +1311,349 @@ it('saves a Portable Show with a render3D-only Pattern but refuses route deliver
     expect(editor.history()).toEqual({ past: [before], future: [] })
     expect(editor.write).toHaveBeenCalledTimes(1)
     console.info(`MCP Portable render3D delivery: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+// #1167 exercises command sequences through the authenticated MCP binding and
+// the personal provider. Generated IDs are read only from public replies or the
+// saved/read Show; authored values below come from the fixture and the request.
+type BoundV2Editor = Awaited<ReturnType<typeof boundEditor>>
+type CommandIdentity = { binding_id: string; operation_id: string }
+
+async function beginCommandSequence(editor: BoundV2Editor, key: string): Promise<CommandIdentity> {
+  const begun = await editor.tool('begin_edit', { binding_id: editor.binding_id, intent: key, idempotency_key: `begin-${key}` })
+  expect(begun.code).toBe('begun')
+  expect(typeof begun.operation_id).toBe('string')
+  return { binding_id: editor.binding_id, operation_id: begun.operation_id as string }
+}
+
+async function changedCommand(editor: BoundV2Editor, identity: CommandIdentity, key: string, name: string, args: object) {
+  const reply = await editor.tool(name, { ...identity, idempotency_key: key, ...args })
+  expect(reply, name).toMatchObject({ code: 'changed', changes: expect.any(Array) })
+  expect((reply.changes as unknown[]).length).toBeGreaterThan(0)
+  return reply
+}
+
+function reportedIds(reply: Record<string, unknown>, collection: string): string[] {
+  const ids = (reply.changes as Array<{ details: Record<string, string[]> }>).flatMap(change => change.details[collection] ?? [])
+  expect(ids.length).toBeGreaterThan(0)
+  expect(ids.every(id => typeof id === 'string' && id.length > 0)).toBe(true)
+  return [...new Set(ids)]
+}
+
+async function expectCommittedCommandSequence(
+  editor: BoundV2Editor,
+  identity: CommandIdentity,
+  expected: ShowRecordV2,
+  past: ShowRecordV2[],
+  writeCount: number,
+) {
+  expect((await editor.tool('commit_edit', { ...identity, idempotency_key: `commit-${writeCount}` })).code).toBe('outcome')
+  await vi.waitFor(async () => expect(await editor.tool('get_outcome', identity)).toMatchObject({
+    code: 'outcome', receipt: { status: 'applied', settlement: 'saved' },
+  }))
+  // The store owns only this ordering stamp; no authored value is copied from
+  // the candidate or generated result into the expected record.
+  expected.updatedAt = editor.current().updatedAt
+  expect(editor.current()).toEqual(expected)
+  expect(editor.readSaved()).toEqual(expected)
+  expect(editor.history()).toEqual({ past, future: [] })
+  expect(editor.write).toHaveBeenCalledTimes(writeCount)
+  expect(editor.write.mock.calls[writeCount - 1]).toEqual([expected.id, expected])
+  const bundle = buildShowFileBundle(editor.readSaved(), { patterns: editor.dependencies.patterns, maps: [], libraries: [] }, {
+    appVersion: 'mcp-v2', exportedAt: '2026-01-01T00:00:00.000Z',
+  })
+  const reopened = await parseShowFileBundle(await serializeShowFileBundle(bundle.bundle), { acceptV2: true })
+  expect(reopened.version).toBe(2)
+  expect(reopened.show).toEqual(expected)
+  return reopened.show as ShowRecordV2
+}
+
+async function expectFastFrames(editor: BoundV2Editor, show: ShowRecordV2, points: Array<{ sample: number[]; pos: [number, number] }>, frames: Array<[number, number[]]>) {
+  const native = await nativeShowV2Artifacts(show, editor.dependencies, points)
+  const replay = native.replay('fast')
+  for (const [atMs, rgb] of frames) {
+    replay.advanceTo(atMs, { stepMs: 1, forceFullIntermediateRender: true })
+    expect(encodeFastReplaySnapshot(replay.snapshot()).frame, `RGB at ${atMs} ms`).toEqual(rgb)
+  }
+}
+
+it('#1167 refuses an over-end Transition, retains the private Cut, then saves a corrected crossfade', async () => {
+  const startedAt = performance.now()
+  const fixture = showMcpReplacementCases[1]
+  const editor = await boundEditor({ patterns: fixture.patterns })
+  try {
+    const before = structuredClone(editor.current())
+    const adjacent = fixture.buildShow(before.id)
+    const identity = await beginCommandSequence(editor, 'transition-sequence')
+    await changedCommand(editor, identity, 'replace-adjacent', 'replace_show', { show: adjacent })
+    const insertion = { from_clip_id: 'red-clip', to_clip_id: 'green-clip', duration_ms: 200, kind: 'crossfade', easing: 'linear' }
+    const refused = await editor.tool('insert_transition', { ...identity, idempotency_key: 'over-end', ...insertion })
+    expect(refused).toMatchObject({ code: 'refused', issues: expect.arrayContaining([expect.objectContaining({
+      code: 'invalid-result', message: expect.stringContaining('The Clip extends beyond Show End.'),
+    })]) })
+    expectUnchangedAfterRefusal(editor, before)
+    expect((await editor.tool('replace_show', { ...identity, idempotency_key: 'same-adjacent', show: adjacent })).code).toBe('unchanged')
+    await changedCommand(editor, identity, 'extend-end', 'set_show_end', { end_ms: 1_200 })
+    const inserted = await changedCommand(editor, identity, 'insert-corrected', 'insert_transition', insertion)
+    const transitionId = (inserted.changes as Array<{ targetId?: string }>)[0].targetId!
+    expect(transitionId).toBeTruthy()
+    expect(reportedIds(inserted, 'transitions')).toContain(transitionId)
+    expectUnchangedAfterRefusal(editor, before)
+
+    const expected = structuredClone(adjacent)
+    expected.name = before.name
+    expected.composition.showEndMs = 1_200
+    expected.composition.layoutOccurrences[0].durationMs = 1_200
+    expected.composition.clips[1].startMs = 700
+    expected.composition.clips[1].appearance.keys[0].timeMs = 700
+    expected.composition.transitions = [{
+      id: transitionId, kind: 'crossfade', durationMs: 200, easing: { curve: 'linear' },
+      participants: [{ id: `${transitionId}-pair`, zoneId: 'left', layerId: 'color-layer', fromClipId: 'red-clip', toClipId: 'green-clip' }],
+      propertyRamps: [],
+    }]
+    expect(new Set(expected.composition.transitions.flatMap(transition => [transition.id, ...transition.participants.map(participant => participant.id)])).size).toBe(2)
+    const reopened = await expectCommittedCommandSequence(editor, identity, expected, [before], 1)
+    await expectFastFrames(editor, reopened, fixture.mapPoints, [
+      [250, [1, 0, 0]], [600, [0.5, 0.5, 0]], [750, [0, 1, 0]], [1_199, [0, 1, 0]],
+    ])
+    const native = await nativeShowV2Artifacts(reopened, editor.dependencies, fixture.mapPoints)
+    const replay = native.replay('fast')
+    replay.advanceTo(600, { stepMs: 1, forceFullIntermediateRender: true })
+    const midpoint = encodeFastReplaySnapshot(replay.snapshot()).frame
+    expect(() => expect(midpoint).toEqual([1, 0, 0])).toThrow()
+    expect(midpoint).toEqual([0.5, 0.5, 0])
+    console.info(`MCP #1167 Transition: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+it('#1167 saves an Effect before publicly addressing it for a second edit with Property keyframes', async () => {
+  const startedAt = performance.now()
+  const fixture = showMcpReplacementCases[0]
+  const editor = await boundEditor({ patterns: fixture.patterns })
+  try {
+    const before = structuredClone(editor.current())
+    const solid = fixture.buildShow(before.id)
+    const first = await beginCommandSequence(editor, 'effect-first')
+    await changedCommand(editor, first, 'replace-solid', 'replace_show', { show: solid })
+    await changedCommand(editor, first, 'add-brightness', 'add_clip_effect', {
+      clip_id: 'red-clip', kind: 'brightness', parameters: { brightness: 0.25 }, apply: { scope: 'whole-clip' },
+    })
+    expectUnchangedAfterRefusal(editor, before)
+    expect((await editor.tool('commit_edit', { ...first, idempotency_key: 'commit-effect' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', first)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    const publicRead = await editor.tool('read_show', { binding_id: editor.binding_id })
+    expect(publicRead.code).toBe('read')
+    const publicShow = publicRead.show as ShowRecordV2
+    const savedEffects = publicShow.composition.clips[0].appearance.keys[0].value.effects
+    expect(savedEffects).toHaveLength(1)
+    const effectId = savedEffects![0].id
+    expect(effectId).toBeTruthy()
+    const firstExpected = structuredClone(solid)
+    firstExpected.name = before.name
+    firstExpected.composition.clips[0].appearance.keys[0].value.effects = [{ id: effectId, kind: 'brightness', brightness: 0.25 }]
+    firstExpected.updatedAt = editor.current().updatedAt
+    expect(publicShow).toEqual(firstExpected)
+    expect(editor.readSaved()).toEqual(firstExpected)
+    expect(editor.history()).toEqual({ past: [before], future: [] })
+    expect(editor.write).toHaveBeenCalledTimes(1)
+    const firstBundle = buildShowFileBundle(editor.readSaved(), { patterns: editor.dependencies.patterns, maps: [], libraries: [] }, { appVersion: 'mcp-v2', exportedAt: '2026-01-01T00:00:00.000Z' })
+    expect((await parseShowFileBundle(await serializeShowFileBundle(firstBundle.bundle), { acceptV2: true })).show).toEqual(firstExpected)
+    await expectFastFrames(editor, firstExpected, fixture.mapPoints, [[250, [0.25, 0, 0]]])
+
+    const second = await beginCommandSequence(editor, 'effect-and-track')
+    await changedCommand(editor, second, 'update-brightness', 'update_clip_effect', {
+      clip_id: 'red-clip', effect_id: effectId, parameters: { brightness: 0.5 }, apply: { scope: 'whole-clip' },
+    })
+    const added = await changedCommand(editor, second, 'add-opacity-track', 'add_property_tracks', {
+      tracks: [{ target: { kind: 'opacity', clip_id: 'red-clip' }, keyframes: [
+        { at_ms: 0, value: 0, easing: 'linear' }, { at_ms: 1_000, value: 1, easing: 'linear' },
+      ] }],
+    })
+    const trackId = reportedIds(added, 'tracks')[0]
+    expect(trackId).toBeTruthy()
+    await changedCommand(editor, second, 'insert-mid-key', 'edit_property_keyframes', {
+      track_id: trackId, edits: { add: [{ at_ms: 500, value: 0.25, easing: 'linear' }] },
+    })
+    expect(editor.current()).toEqual(firstExpected)
+    expect(editor.readSaved()).toEqual(firstExpected)
+    expect(editor.write).toHaveBeenCalledTimes(1)
+    const expected = structuredClone(firstExpected)
+    expected.composition.clips[0].appearance.keys[0].value.effects = [{ id: effectId, kind: 'brightness', brightness: 0.5 }]
+    // Key identities have no authored spelling. Normalize only their IDs from
+    // the saved public record, while spelling all values and references here.
+    expect(editor.readSaved().composition.propertyTracks).toHaveLength(0)
+    expect((await editor.tool('commit_edit', { ...second, idempotency_key: 'commit-effect-track' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', second)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    const savedTrack = editor.readSaved().composition.propertyTracks[0]
+    expect(savedTrack.id).toBe(trackId)
+    const keyIds = savedTrack.keyframes.map(key => key.id)
+    expect(new Set(keyIds).size).toBe(3)
+    expected.composition.propertyTracks = [{
+      id: trackId, target: { kind: 'clip-opacity', clipId: 'red-clip' }, activeStartMs: 0, activeDurationMs: 1_000,
+      keyframes: [
+        { id: keyIds[0], timeMs: 0, value: 0, easing: { curve: 'linear' } },
+        { id: keyIds[1], timeMs: 500, value: 0.25, easing: { curve: 'linear' } },
+        { id: keyIds[2], timeMs: 1_000, value: 1, easing: { curve: 'linear' } },
+      ],
+    }]
+    expected.updatedAt = editor.current().updatedAt
+    expect(editor.current()).toEqual(expected)
+    expect(editor.readSaved()).toEqual(expected)
+    expect(editor.history()).toEqual({ past: [before, firstExpected], future: [] })
+    expect(editor.write).toHaveBeenCalledTimes(2)
+    const bundle = buildShowFileBundle(editor.readSaved(), { patterns: editor.dependencies.patterns, maps: [], libraries: [] }, { appVersion: 'mcp-v2', exportedAt: '2026-01-01T00:00:00.000Z' })
+    const reopened = await parseShowFileBundle(await serializeShowFileBundle(bundle.bundle), { acceptV2: true })
+    expect(reopened.show).toEqual(expected)
+    await expectFastFrames(editor, expected, fixture.mapPoints, [
+      [250, [0.0625, 0, 0]], [500, [0.125, 0, 0]], [750, [0.3125, 0, 0]],
+    ])
+    console.info(`MCP #1167 Effect Property: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+it('#1167 saves Zone, Layout interval and Marker metadata without changing Clip playback', async () => {
+  const startedAt = performance.now()
+  const fixture = showMcpReplacementCases[3]
+  const editor = await boundEditor({ patterns: fixture.patterns })
+  try {
+    const before = structuredClone(editor.current())
+    const routed = fixture.buildShow(before.id)
+    const identity = await beginCommandSequence(editor, 'layout-zone-marker')
+    await changedCommand(editor, identity, 'replace-routed', 'replace_show', { show: routed })
+    await changedCommand(editor, identity, 'zone-left', 'update_zone', { zone_id: 'left', name: 'Stage left', nominal_pixel_count: 1 })
+    const addedInterval = await changedCommand(editor, identity, 'add-interval', 'add_layout_interval', { layout_id: 'layout', at_ms: 500 })
+    const intervalId = (addedInterval.changes as Array<{ targetId?: string }>)[0].targetId!
+    expect(reportedIds(addedInterval, 'layoutIntervals')).toContain(intervalId)
+    await changedCommand(editor, identity, 'split-position', 'update_layout_interval', { interval_id: intervalId, split_position: 0.8 })
+    const addedMarker = await changedCommand(editor, identity, 'add-cue', 'add_marker', { at_ms: 250, name: 'Cue' })
+    const markerId = (addedMarker.changes as Array<{ targetId?: string }>)[0].targetId!
+    expect(reportedIds(addedMarker, 'markers')).toContain(markerId)
+    await changedCommand(editor, identity, 'move-cue', 'update_marker', { marker_id: markerId, at_ms: 500, color: '#ff0000' })
+    expectUnchangedAfterRefusal(editor, before)
+    const expected = structuredClone(routed)
+    expected.name = before.name
+    expected.zones[0] = { id: 'left', name: 'Stage left', nominalPixelCount: 1 }
+    expected.composition.layoutOccurrences = [
+      { id: 'layout-occurrence', layoutId: 'layout', startMs: 0, durationMs: 500, parameters: {} },
+      { id: intervalId, layoutId: 'layout', startMs: 500, durationMs: 500, parameters: { splitPosition: 0.8 } },
+    ]
+    expected.composition.markers = [{ id: markerId, timeMs: 500, name: 'Cue', color: '#ff0000' }]
+    expect(intervalId).not.toBe(expected.composition.layoutOccurrences[0].id)
+    const reopened = await expectCommittedCommandSequence(editor, identity, expected, [before], 1)
+    await expectFastFrames(editor, reopened, fixture.mapPoints, [
+      [250, [1, 0, 0, 0, 1, 0]], [750, [1, 0, 0, 1, 0, 0]],
+    ])
+    console.info(`MCP #1167 Layout Zone Marker: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+it('#1167 saves shared and independent Clip copies, empties the Show, and undoes the deletion', async () => {
+  const startedAt = performance.now()
+  const fixture = showMcpReplacementCases[0]
+  const editor = await boundEditor({ patterns: fixture.patterns })
+  try {
+    const before = structuredClone(editor.current())
+    const solid = fixture.buildShow(before.id)
+    const first = await beginCommandSequence(editor, 'split-duplicate')
+    await changedCommand(editor, first, 'replace-solid', 'replace_show', { show: solid })
+    await changedCommand(editor, first, 'extend-end', 'set_show_end', { end_ms: 1_500 })
+    await changedCommand(editor, first, 'resize-red', 'resize_clip', { clip_id: 'red-clip', end_ms: 500 })
+    const split = await changedCommand(editor, first, 'split-red', 'split_clip', { clip_id: 'red-clip', at_ms: 250 })
+    const rightId = reportedIds(split, 'clips').find(id => id !== 'red-clip')!
+    expect(rightId).toBeTruthy()
+    const shared = await changedCommand(editor, first, 'duplicate-shared', 'duplicate_clip', { clip_id: 'red-clip', start_ms: 500 })
+    const sharedId = reportedIds(shared, 'clips').find(id => id !== 'red-clip')!
+    const independent = await changedCommand(editor, first, 'duplicate-independent', 'duplicate_clip', { clip_id: 'red-clip', start_ms: 1_000, independent: true })
+    const independentId = reportedIds(independent, 'clips').find(id => id !== 'red-clip')!
+    expect(new Set(['red-clip', rightId, sharedId, independentId]).size).toBe(4)
+    expectUnchangedAfterRefusal(editor, before)
+    // Generated appearance/runtime IDs are opaque. Their relationships and
+    // uniqueness are asserted before they enter this literal-value preimage.
+    expect((await editor.tool('commit_edit', { ...first, idempotency_key: 'commit-copies' })).code).toBe('outcome')
+    await vi.waitFor(async () => expect(await editor.tool('get_outcome', first)).toMatchObject({ receipt: { status: 'applied', settlement: 'saved' } }))
+    const saved = editor.readSaved()
+    const savedClips = saved.composition.clips
+    expect(savedClips.map(clip => clip.id)).toEqual(['red-clip', rightId, sharedId, independentId])
+    const independentCopy = savedClips[3]
+    const independentInstanceId = independentCopy.instanceId
+    expect(independentInstanceId).not.toBe('red-instance')
+    expect(new Set(saved.composition.patternInstances.map(instance => instance.id)).size).toBe(2)
+    expect(savedClips.map(clip => clip.instanceId)).toEqual(['red-instance', 'red-instance', 'red-instance', independentInstanceId])
+    const keyIds = savedClips.map(clip => clip.appearance.keys[0].id)
+    expect(new Set(keyIds).size).toBe(4)
+    const expected = structuredClone(solid)
+    expected.name = before.name
+    expected.composition.showEndMs = 1_500
+    expected.composition.layoutOccurrences[0].durationMs = 1_500
+    const source = structuredClone(solid.composition.clips[0])
+    expected.composition.clips = [
+      { ...source, durationMs: 250 },
+      { ...structuredClone(source), id: rightId, startMs: 250, durationMs: 250, appearance: { keys: [{ ...source.appearance.keys[0], id: keyIds[1], timeMs: 250 }] } },
+      { ...structuredClone(source), id: sharedId, startMs: 500, durationMs: 250, appearance: { keys: [{ ...source.appearance.keys[0], id: keyIds[2], timeMs: 500 }] } },
+      { ...structuredClone(source), id: independentId, instanceId: independentInstanceId, startMs: 1_000, durationMs: 250, appearance: { keys: [{ ...source.appearance.keys[0], id: keyIds[3], timeMs: 1_000 }] } },
+    ]
+    expected.composition.patternInstances.push({ ...structuredClone(solid.composition.patternInstances[0]), id: independentInstanceId })
+    expected.updatedAt = editor.current().updatedAt
+    expect(editor.current()).toEqual(expected)
+    expect(editor.readSaved()).toEqual(expected)
+    expect(editor.history()).toEqual({ past: [before], future: [] })
+    expect(editor.write).toHaveBeenCalledTimes(1)
+    const firstBundle = buildShowFileBundle(editor.readSaved(), { patterns: editor.dependencies.patterns, maps: [], libraries: [] }, { appVersion: 'mcp-v2', exportedAt: '2026-01-01T00:00:00.000Z' })
+    expect((await parseShowFileBundle(await serializeShowFileBundle(firstBundle.bundle), { acceptV2: true })).show).toEqual(expected)
+    await expectFastFrames(editor, expected, fixture.mapPoints, [
+      [125, [1, 0, 0]], [375, [1, 0, 0]], [625, [1, 0, 0]], [875, [0, 0, 0]], [1_125, [1, 0, 0]], [1_375, [0, 0, 0]],
+    ])
+
+    const second = await beginCommandSequence(editor, 'remove-all')
+    await changedCommand(editor, second, 'remove-four', 'remove_clips', { clip_ids: ['red-clip', rightId, sharedId, independentId] })
+    expect(editor.current()).toEqual(expected)
+    expect(editor.write).toHaveBeenCalledTimes(1)
+    const emptyExpected = structuredClone(expected)
+    emptyExpected.composition.clips = []
+    emptyExpected.composition.patternInstances = []
+    emptyExpected.composition.transitions = []
+    emptyExpected.composition.propertyTracks = []
+    const reopenedEmpty = await expectCommittedCommandSequence(editor, second, emptyExpected, [before, expected], 2)
+    expect(prepareShowStageV2(reopenedEmpty, editor.dependencies).status).toBe('empty')
+    expect(await useShowStore.getState().undoShowV2Pilot(before.id)).toBe(true)
+    await vi.waitFor(() => expect(editor.write).toHaveBeenCalledTimes(3))
+    const undone = editor.current()
+    expect(undone).toEqual({ ...expected, updatedAt: undone.updatedAt })
+    expect(editor.readSaved()).toEqual(undone)
+    expect(editor.history().future).toEqual([emptyExpected])
+    console.info(`MCP #1167 Shared Independent Empty: ${Math.round(performance.now() - startedAt)} ms`)
+  } finally { editor.close() }
+}, 120_000)
+
+it('#1167 refuses missing Stage map at final admission and saves a new corrected edit', async () => {
+  const startedAt = performance.now()
+  const fixture = showMcpReplacementCases[0]
+  const editor = await boundEditor({ patterns: fixture.patterns })
+  try {
+    const before = structuredClone(editor.current())
+    const invalid = fixture.buildShow(before.id)
+    invalid.stageMapId = 'missing-stage-map'
+    expect(validateShowRecordV2(invalid)).toEqual([])
+    const first = await beginCommandSequence(editor, 'missing-stage-map')
+    await changedCommand(editor, first, 'replace-missing-map', 'replace_show', { show: invalid })
+    expectUnchangedAfterRefusal(editor, before)
+    expect((await editor.tool('commit_edit', { ...first, idempotency_key: 'commit-missing-map' })).code).toBe('outcome')
+    expect(await editor.tool('get_outcome', first)).toMatchObject({ code: 'outcome', receipt: {
+      status: 'refused', reason: 'invalid-candidate',
+      diagnostic: { stage: 'normalized', issues: expect.arrayContaining([expect.objectContaining({
+        code: 'map-metadata-unavailable', path: JSON.stringify(['stageMap', 'missing-stage-map']),
+      })]) },
+    } })
+    expectUnchangedAfterRefusal(editor, before)
+    expect(await editor.tool('read_show', { binding_id: editor.binding_id })).toMatchObject({ code: 'read', show: before })
+    const corrected = fixture.buildShow(before.id)
+    const second = await beginCommandSequence(editor, 'correct-stage-map')
+    await changedCommand(editor, second, 'replace-correct', 'replace_show', { show: corrected })
+    expectUnchangedAfterRefusal(editor, before)
+    const expected = structuredClone(corrected)
+    expected.name = before.name
+    await expectCommittedCommandSequence(editor, second, expected, [before], 1)
+    console.info(`MCP #1167 Stage map correction: ${Math.round(performance.now() - startedAt)} ms`)
   } finally { editor.close() }
 }, 120_000)
