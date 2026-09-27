@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "issue": "1165",
+  "route": "/PXLBLZ-IDE/studio/shows/agent-mcp-1165-reload?capture",
+  "operation": "Real authenticated MCP browser regression: begin a private green replacement over saved red, reload, then verify the old binding read and commit return no_live_editor and the complete saved red Show remains. This Stage canvas capture at 250 ms shows the preserved red output; the isolated synthetic-account run and assertions are documented in docs/reference/evidence/issue-1165-mcp-lifecycle/README.md.",
+  "captures": [
+    ".wrsp/ui-proof/1165-mcp-reload.png"
+  ],
+  "capturedAtCommit": "aafe9171886897ba6aadfc37775aaac6a52b33c3"
+}
