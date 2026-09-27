@@ -3,7 +3,7 @@
 Commits get a focused conservative signal. Final candidates receive the required
 full-suite evidence and substantive exact-range review before landing.
 Publication consumes those records and runs its separate artifact oracle;
-it does not execute the four heavy suites again.
+it does not execute the seven heavy suites again.
 
 Since #724 the gate implementation lives in the shared
 `@whiteroom/software-process` package (vendored as a release tarball under `vendor/`, a `file:` devDependency in
@@ -26,7 +26,7 @@ and [WRSP 0.5.0 consumer guards](#wrsp-050-consumer-guards-940) for guard histor
 
 ### Runner suite overlap (WRSP #42, #1146)
 
-`full-vitest` is in group `vitest`; the three required Playwright suites are in
+`full-vitest` is in group `vitest`; the six required Playwright suites are in
 group `playwright`. With host capacity 2, the runner may run full Vitest
 alongside one browser suite, while browser suites stay mutually serial. A
 validated qualified remote job, checked by `qualifiedRemoteExecution()` and
@@ -36,6 +36,24 @@ project runs one file at a time so it does not stack on a browser job. The
 census test in `test/perf-harness/issue718.test.ts` has a 10 s budget approved
 in [WRSP #42](https://github.com/jon-whiteroomsoftware/whiteroom-software-process/issues/42).
 See also [PXLBLZ-IDE #1146](https://github.com/jon-whiteroomsoftware/PXLBLZ-IDE/issues/1146).
+
+### Isolated MCP Show shards (#1165)
+
+The required `e2e-shows` suite runs the five other authenticated Show specs.
+The nine current cases in `e2e/agent-mcp-replacement.auth.spec.ts` run exactly
+once across `e2e-shows-mcp-1`, `e2e-shows-mcp-2`, and `e2e-shows-mcp-3`.
+Playwright's `fullyParallel` setting shards individual cases. Run locally with
+`npm run test:e2e:shows:mcp-1`, `npm run test:e2e:shows:mcp-2`, and
+`npm run test:e2e:shows:mcp-3`; all three are required runner and push-gate
+evidence, alongside the other four suites.
+
+Each authenticated Playwright invocation provisions its own port, OAuth origin,
+D1 store, and Durable Objects. Separate synthetic accounts in one invocation
+still share the origin-wide OAuth authority: it admits at most 120
+non-revocation requests and 10 client registrations per minute, including MCP
+traffic in the request count. The three bounded shards keep this campaign's
+MCP traffic in separate real authorities. They do not change production
+admission or establish capacity at a larger scale.
 
 ### Runner worker sizing (#1152)
 
@@ -488,7 +506,7 @@ preserves pending state and changes no breaker fact. Product defects retain
 normal severity. Successful composition records both review scopes in a native
 version-2 receipt; advisories from either stage remain advisory.
 
-The final four runner suites still bind the final committed tip before landing;
+The final seven runner suites still bind the final committed tip before landing;
 publication consumes their evidence without rerunning them. A composed receipt
 does not qualify for generic content-identical rebase carry. Ordinary review
 retains its proof prerequisite and version-1 receipt path.
@@ -631,9 +649,10 @@ The hook first runs `npm run lint`; a failure refuses the push before the
 approval check (WRSP #138).
 
 After every outgoing ref has exact coverage, the hook runs the artifact oracle
-gate and then requires passing WRSP evidence for the exact local tip. The four
-required suites are `test:full`, the public Playwright smoke suite, and the
-authenticated smoke and Show suites. Agents create that evidence before
+gate and then requires passing WRSP evidence for the exact local tip. The seven
+required suites are `test:full`, the public Playwright smoke suite, the
+authenticated smoke and Show suites, and all three isolated MCP Show shards.
+Agents create that evidence before
 landing with `npx wrsp-runner test <tip>`; the hook never starts a local heavy
 suite or falls back to one. Because this is a Git hook rather than a Claude or
 Codex lifecycle hook, it applies equally to agent and terminal pushes.
@@ -775,6 +794,9 @@ it.
 | `npm run test:e2e` (unauthenticated) | required runner evidence at pre-push |
 | `npm run test:e2e:auth-smoke` | required runner evidence at pre-push |
 | `npm run test:e2e:shows` | required runner evidence at pre-push |
+| `npm run test:e2e:shows:mcp-1` | required runner evidence at pre-push |
+| `npm run test:e2e:shows:mcp-2` | required runner evidence at pre-push |
+| `npm run test:e2e:shows:mcp-3` | required runner evidence at pre-push |
 | `npm run test:e2e:auth-full` (every auth spec) | manual |
 
 The required Show suite runs on the v2 backing since #1067 activation, and

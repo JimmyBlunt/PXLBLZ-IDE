@@ -23,3 +23,21 @@ The ignored `playwright-report/agent-mcp/` packages from the passing two-worker 
 All ten PNGs are 416×416. Their manifests record literal opaque red `[255,0,0,255]` or green `[0,255,0,255]` at both grid centres, verified byte counts and SHA-256, zero browser errors, retry 0, and one synthetic account per case. The reload manifest records `no_live_editor` for both old-binding `read_show` and `commit_edit`, complete original-red durable record preservation, and no green Clip. The reload PNG was opened and visually checked. The earlier single-case reload package remains at `90c9cd57cda04c76-worker-0-retry-0-repeat-0/`.
 
 These manifests report `sourceCommit: 4c9065ced29290bf079874adde9bee63352ab437` and `testFilesUncommitted: true`: that was the actual HEAD during capture, not attribution of the new test code to that commit. The coordinator owns committed-tip suites, review, and landing.
+
+## Full-suite OAuth exhaustion and shard corrective
+
+The five focused #1165 browser cases passed, but the committed-tip `e2e-shows` runner suite still failed. The retained `.wrsp/runner/aafe91718868/e2e-shows/log` at `aafe9171` records 114 passes and two final MCP setup failures: timeline Undo received HTTP 429 at `/oauth/token`, and reload received HTTP 429 at `/oauth/register`. Its `result.json` records exit code 1. Those results do not establish full-suite completion at the current base `6c77ff2b`.
+
+The OAuth authority is named by origin and enforces 120 non-revocation requests per minute, including MCP traffic, plus 10 client registrations per minute. Separate synthetic accounts in one run share those counters. The corrective removes the MCP spec from the five-spec Show command and runs its nine cases through three required Playwright shards. Each authenticated Playwright invocation provisions a fresh port and OAuth origin with isolated D1 and Durable Objects, so each shard uses a separate real authority. Production admission stays unchanged. These are bounded shards for this campaign, not a general scale claim or a new harness.
+
+The three local commands are `npm run test:e2e:shows:mcp-1`, `npm run test:e2e:shows:mcp-2`, and `npm run test:e2e:shows:mcp-3`. All three must pass; the coordinator still owns seven-suite exact-tip runner evidence before landing.
+
+The local corrective runs used two workers per shard, no retry, and real authenticated Playwright. All nine case IDs in the spec appeared exactly once in the passing logs; no shard log contains an HTTP 429.
+
+| Shard | Passing cases by spec line | Playwright time | Log |
+| --- | --- | --- | --- |
+| 1/3 | 277, 343, 393 (3/3) | 30.0 s | `/tmp/wrsp-log/20260927T011958-54578-npm-run.log` (`EXIT:0`) |
+| 2/3 | 480, 560, 613 (3/3) | 29.0 s | `/tmp/wrsp-log/20260927T012042-57466-npm-run.log` (`EXIT:0`) |
+| 3/3 | 664, 707, 761 (3/3) | 24.9 s | `/tmp/wrsp-log/20260927T012126-60536-npm-run.log` (`EXIT:0`) |
+
+The `check:e2e-coverage` and `check:e2e-locators` commands passed; `npm run build` passed. The focused runs do not replace the seven exact-tip runner suite results.

@@ -5,13 +5,15 @@
     "Textbox Undo acts on the draft; timeline Undo and Redo act on the Show history without consuming or truncating the wrong history.",
     "Timeline Undo supersedes a private MCP candidate: its commit refuses revision-conflict, the complete red Show remains durable, and Redo restores the prior green Show.",
     "After ordinary reload, an old binding returns exactly no_live_editor for read_show and commit_edit; its private green candidate never becomes durable or visible.",
-    "Only small browser leave cleanup posts use fetch keepalive; registration, receive, ordinary controls, and payload replies retain their existing request lifetime and independent close abort behavior."
+    "Only small browser leave cleanup posts use fetch keepalive; registration, receive, ordinary controls, and payload replies retain their existing request lifetime and independent close abort behavior.",
+    "The nine existing MCP replacement browser cases run exactly once across three isolated authorities; a passing focused subset does not establish the required full-suite result."
   ],
   "partitions": [
     "Acknowledged registration closed on page teardown versus a registration acknowledged after close; each sends exactly one leave and leaves no registration behind.",
     "Dirty duration draft released by Escape, cancelled while waiting, and textbox-local Undo before timeline Undo.",
     "Saved green Show with a private half-opacity candidate versus restored red Show after timeline Undo and green again after Redo.",
-    "Live binding before reload versus old binding after reload, with the new editor healthy and the original red Show present."
+    "Live binding before reload versus old binding after reload, with the new editor healthy and the original red Show present.",
+    "One MCP spec under the shared Show authority versus three case shards with independent ports, OAuth origins, D1 stores, and Durable Objects."
   ],
   "sequences": [
     "Seed red Show, bind an external MCP client, privately replace with green, commit into duration wait, press Escape, verify one saved green history step, then Undo to red.",
@@ -26,11 +28,13 @@
     "Complete D1 Show record equality against independently cloned expected records or the pre-edit saved snapshot after every accepted, cancelled, refused, undone, redone, and reloaded step.",
     "Real canvas PNGs decoded at both declared 32x32 grid centres at fixed 250 ms, with literal opaque red or green RGBA; manifest writing verifies byte counts and SHA-256.",
     "Old binding read_show and commit_edit return top-level no_live_editor after healthy-server reload, while the private green candidate never appears in the saved record, Clip controls, or Stage.",
-    "The browser-session fetch seam records RequestInit keepalive true only for leave in both close orderings; register and receive have no true keepalive."
+    "The browser-session fetch seam records RequestInit keepalive true only for leave in both close orderings; register and receive have no true keepalive.",
+    "Each of the three npm shard commands runs the real authenticated editor and reports passing case names without HTTP 429; the union covers all nine existing MCP cases with no duplicate or omission."
   ],
   "residualGaps": [
     "Fetch keepalive is best-effort while transport remains available. A hard close that cannot reach the server relies on the existing stale-registration expiry, so immediate retirement is not promised in that case.",
     "The browser cases cover Fast 2D plane rendering and fixed-time opaque red/green Stage output; hardware, Precise fidelity, and real expiry timing are outside this slice.",
-    "The recorded browser runs preceded the final commit and do not replace exact committed-tip runner suites, candidate review, or landing owned by the coordinator."
+    "The recorded focused browser runs preceded the final commit and do not replace exact committed-tip runner suites, candidate review, or landing owned by the coordinator.",
+    "The prior committed-tip e2e-shows runner failed after 114 passes with two HTTP 429 MCP setup failures; the three shard results do not by themselves replace the coordinator's seven required exact-tip suite results."
   ]
 }
