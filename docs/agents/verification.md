@@ -40,7 +40,7 @@ See also [PXLBLZ-IDE #1146](https://github.com/jon-whiteroomsoftware/PXLBLZ-IDE/
 ### Isolated MCP Show shards (#1165)
 
 The required `e2e-shows` suite runs the five other authenticated Show specs.
-The nine current cases in `e2e/agent-mcp-replacement.auth.spec.ts` run exactly
+The cases in `e2e/agent-mcp-replacement.auth.spec.ts` run exactly
 once across `e2e-shows-mcp-1`, `e2e-shows-mcp-2`, and `e2e-shows-mcp-3`.
 Playwright's `fullyParallel` setting shards individual cases. Run locally with
 `npm run test:e2e:shows:mcp-1`, `npm run test:e2e:shows:mcp-2`, and
