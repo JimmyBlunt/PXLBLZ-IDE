@@ -3,12 +3,14 @@ import { createHash, randomUUID } from 'node:crypto'
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Page, TestInfo } from '@playwright/test'
+import { artifactHash } from '../src/engine/artifactStamp'
+import { parseEpe } from '../src/engine/epeImport'
 import type { ShowRecordV2 } from '../src/engine/showCompositionV2'
 import { changedPixelsBetween, measuredExact, samplesAt, type Rgba, type RgbaImage } from '../src/test/showCapturePixelEvidence'
 import { showMcpReplacementCases } from '../src/test/showMcpReplacementFixtures'
 import { expect, test } from './fixtures/authenticated'
 import { squareWorkspaceShow } from './fixtures/showWorkspace'
-import { findStoredShowV2, seedShowV2 } from './support/showBackingRecords'
+import { findStoredShowV2, listStoredShowsV2, seedShowV2 } from './support/showBackingRecords'
 import { connectShowMcp, type ShowMcpClient } from './support/agentMcpClient'
 
 const relevantTestFiles = [
@@ -121,7 +123,8 @@ async function openEditor(page: Page, show: ShowRecordV2): Promise<void> {
 }
 
 async function armDrawer(page: Page): Promise<void> {
-  await page.getByRole('button', { name: /^Open the Agent drawer/ }).click()
+  const open = page.getByRole('button', { name: /^Open the Agent drawer/ })
+  if (await open.isVisible()) await open.click()
   await page.getByRole('button', { name: 'Connect your agent with MCP' }).click()
   const drawer = page.getByRole('complementary', { name: 'Agent drawer', exact: true })
   await expect(drawer.getByRole('button', { name: 'Ready to connect' })).toBeVisible()
@@ -273,6 +276,290 @@ async function writeEvidence(name: string, testInfo: TestInfo, show: ShowRecordV
   }
   await writeFile(join(harness.runDirectory, `${name}.json`), JSON.stringify(manifest, null, 2) + '\n')
 }
+
+async function createPersonalShow(page: Page, name: string): Promise<ShowRecordV2> {
+  await page.goto('studio/shows')
+  await seedPatterns(page)
+  const priorIds = (await listStoredShowsV2(page)).map(show => show.id)
+  await expect(page.getByRole('button', { name: /Account menu for playwright-worker-\d+/i })).toBeVisible()
+  await page.getByRole('button', { name: 'Add show' }).click()
+  await page.getByRole('button', { name: 'New show' }).click()
+  await page.getByRole('button', { name: 'Create Portable Show' }).click()
+  await page.getByRole('textbox', { name: 'Show name' }).fill(name)
+  await page.getByRole('combobox', { name: 'Reference map' }).selectOption('plane')
+  const previewPixels = page.getByRole('textbox', { name: 'Preview pixels exact pixel count' })
+  await previewPixels.fill('1024')
+  await previewPixels.press('Enter')
+  await page.getByRole('button', { name: 'Create Show' }).click()
+  await expect(page).toHaveURL(/\/studio\/shows\/[0-9a-f-]{36}$/)
+  const id = new URL(page.url()).pathname.split('/').at(-1)!
+  expect(id).toMatch(/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/)
+  expect(priorIds).not.toContain(id)
+  await expect.poll(async () => await findStoredShowV2(page, id)).toBeDefined()
+  const created = (await findStoredShowV2(page, id))!
+  expect(created).toMatchObject({
+    version: 2, id, name, stageMapId: 'plane',
+    outputContract: { kind: 'portable-2d', referenceMapId: 'plane', referencePixelCount: 1024 },
+  })
+  expect(created.composition.clips).toHaveLength(2)
+  expect(created.composition.layers).toHaveLength(1)
+  expect(created.composition.transitions).toHaveLength(1)
+  const personalTree = page.getByRole('tree', { name: 'Shows', exact: true })
+  const builtInTree = page.getByRole('tree', { name: 'Built-in Shows', exact: true })
+  await expect(personalTree.getByRole('treeitem', { name, exact: true })).toHaveAttribute('aria-selected', 'true')
+  await expect(builtInTree.getByRole('treeitem', { name, exact: true })).toHaveCount(0)
+  return created
+}
+
+function changedIds(reply: Record<string, unknown>, field: 'layers' | 'clips' | 'instances' | 'appearanceKeys'): string[] {
+  expect(reply.code).toBe('changed')
+  const changes = reply.changes as Array<{ details: Record<string, string[]> }>
+  expect(changes.length).toBeGreaterThan(0)
+  const ids = changes.flatMap(change => change.details[field] ?? [])
+  expect(ids.every(id => typeof id === 'string' && id.length > 0)).toBe(true)
+  return [...new Set(ids)]
+}
+
+async function downloadAndReopenShow(
+  page: Page, saved: ShowRecordV2, runDirectory: string, label: string,
+): Promise<{ showFile: object; epe: object }> {
+  await mkdir(runDirectory, { recursive: true })
+  const showDownloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Show actions' }).click()
+  await page.getByRole('menuitem', { name: 'Export Show file…' }).click()
+  const showDownload = await showDownloadPromise
+  expect(showDownload.suggestedFilename()).toMatch(/\.pxlshow$/)
+  const showPath = join(runDirectory, `${label}.pxlshow`)
+  await showDownload.saveAs(showPath)
+  const showBytes = await readFile(showPath)
+  expect(showBytes.length).toBeGreaterThan(0)
+  const reopened = await page.evaluate(async bytes => {
+    const load = (path: string) => import(path)
+    const { parseShowFileBundle } = await load('/PXLBLZ-IDE/src/engine/showFileBundle.ts')
+    return parseShowFileBundle(new Uint8Array(bytes), { acceptV2: true })
+  }, [...showBytes])
+  expect(reopened.show).toEqual(saved)
+
+  const epeDownloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Show actions' }).click()
+  await page.getByRole('menuitem', { name: 'Download .epe' }).click()
+  const epeDownload = await epeDownloadPromise
+  expect(epeDownload.suggestedFilename()).toMatch(/\.epe$/)
+  const epePath = join(runDirectory, `${label}.epe`)
+  await epeDownload.saveAs(epePath)
+  const epeBytes = await readFile(epePath)
+  const parsed = parseEpe(epeBytes.toString('utf8'))
+  expect(parsed.stamp).toMatchObject({
+    kind: 'show', id: saved.id,
+    showOutputContract: { version: 1, kind: 'portable-2d', dimensions: [2], mapClasses: ['surface'], resolution: 'variable' },
+  })
+  expect(parsed.stamp!.hash).toBe(artifactHash(parsed.src))
+  expect(parsed.src).toMatch(/export function render/)
+  return {
+    showFile: { path: `${label}.pxlshow`, filename: showDownload.suggestedFilename(), bytes: showBytes.length,
+      sha256: createHash('sha256').update(showBytes).digest('hex'), reopened: true },
+    epe: { path: `${label}.epe`, filename: epeDownload.suggestedFilename(), bytes: epeBytes.length,
+      sha256: createHash('sha256').update(epeBytes).digest('hex'), reopened: true, sourceHash: artifactHash(parsed.src) },
+  }
+}
+
+test('real MCP authors an empty UI-created personal Show incrementally (#1166)', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const started = performance.now()
+  const browserErrors: string[] = []
+  page.on('pageerror', error => browserErrors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error') browserErrors.push(message.text()) })
+  const created = await createPersonalShow(page, `MCP created sequence ${randomUUID().slice(0, 8)}`)
+  await openEditor(page, created)
+  const harness = captureHarness(page, testInfo, 'create-sequence')
+  await harness.install()
+  const bindingStart = performance.now()
+  const client = await boundClient(page, created)
+  const bindingMs = performance.now() - bindingStart
+  let clientClosed = false
+  let reloadClient: ShowMcpClient | undefined
+  try {
+    const initialRead = await client.tool('read_show', { binding_id: client.bindingId })
+    expect(initialRead).toMatchObject({ code: 'read', show: created })
+    const starter = initialRead.show as ShowRecordV2
+    const begun = await client.tool('begin_edit', {
+      binding_id: client.bindingId, intent: 'Remove starter content to author an empty personal Show', idempotency_key: randomUUID(),
+    })
+    expect(begun.code).toBe('begun')
+    const removal = { binding_id: client.bindingId, operation_id: begun.operation_id as string }
+    expect((await client.tool('remove_clips', {
+      ...removal, idempotency_key: randomUUID(), clip_ids: starter.composition.clips.map(clip => clip.id),
+    })).code).toBe('changed')
+    for (const layer of starter.composition.layers) {
+      expect((await client.tool('remove_layer', {
+        ...removal, idempotency_key: randomUUID(), layer_id: layer.id,
+      })).code).toBe('changed')
+    }
+    expect((await client.tool('set_show_end', {
+      ...removal, idempotency_key: randomUUID(), end_ms: 1000,
+    })).code).toBe('changed')
+    expect((await client.tool('commit_edit', { ...removal, idempotency_key: randomUUID() })).code).toBe('outcome')
+    await expect.poll(async () => (await client.tool('get_outcome', removal)).receipt).toMatchObject({ status: 'applied', settlement: 'saved' })
+    const emptyExpected = structuredClone(created)
+    emptyExpected.composition = {
+      ...emptyExpected.composition, showEndMs: 1000, patternInstances: [], layers: [], clips: [], transitions: [],
+      propertyTracks: [], layoutOccurrences: emptyExpected.composition.layoutOccurrences.map(occurrence => ({ ...occurrence, durationMs: 1000 })),
+    }
+    const emptySaved = await assertStored(page, created, emptyExpected)
+    expect(emptySaved.composition.clips).toEqual([])
+    expect(emptySaved.composition.patternInstances).toEqual([])
+    expect(emptySaved.composition.layers).toEqual([])
+    expect(emptySaved.composition.transitions).toEqual([])
+
+    const emptyRead = await client.tool('read_show', { binding_id: client.bindingId })
+    expect(emptyRead).toMatchObject({ code: 'read', show: emptySaved })
+    const authored = await client.tool('begin_edit', {
+      binding_id: client.bindingId, intent: 'Author adjacent red and green Clips on a new Layer', idempotency_key: randomUUID(),
+    })
+    expect(authored.code).toBe('begun')
+    const edit = { binding_id: client.bindingId, operation_id: authored.operation_id as string }
+    const zoneId = created.zones[0].id
+    const redReply = await client.tool('create_layers', {
+      ...edit, idempotency_key: randomUUID(),
+      layers: [{ zone_id: zoneId, name: 'Authored sequence', clips: [{
+        zone_id: zoneId, start_ms: 0, duration_ms: 500, pattern: { kind: 'user', id: 'mcp-red' }, instance: 'sole',
+      }] }],
+    })
+    const [layerId] = changedIds(redReply, 'layers')
+    const [redClipId] = changedIds(redReply, 'clips')
+    const [redInstanceId] = changedIds(redReply, 'instances')
+    const [redAppearanceId] = changedIds(redReply, 'appearanceKeys')
+    expect([layerId, redClipId, redInstanceId, redAppearanceId].every(Boolean)).toBe(true)
+    expect(changedIds(redReply, 'layers')).toHaveLength(1)
+    expect(changedIds(redReply, 'clips')).toHaveLength(1)
+    expect(changedIds(redReply, 'instances')).toHaveLength(1)
+    expect(changedIds(redReply, 'appearanceKeys')).toHaveLength(1)
+    const greenReply = await client.tool('create_clips', {
+      ...edit, idempotency_key: randomUUID(),
+      clips: [{ zone_id: zoneId, layer_id: layerId, start_ms: 500, duration_ms: 500,
+        pattern: { kind: 'user', id: 'mcp-green' }, instance: 'sole' }],
+    })
+    const [greenClipId] = changedIds(greenReply, 'clips')
+    const [greenInstanceId] = changedIds(greenReply, 'instances')
+    const [greenAppearanceId] = changedIds(greenReply, 'appearanceKeys')
+    expect(changedIds(greenReply, 'clips')).toHaveLength(1)
+    expect(changedIds(greenReply, 'instances')).toHaveLength(1)
+    expect(changedIds(greenReply, 'appearanceKeys')).toHaveLength(1)
+    expect(new Set([layerId, redClipId, redInstanceId, redAppearanceId, greenClipId, greenInstanceId, greenAppearanceId]).size).toBe(7)
+    expect(await findStoredShowV2(page, created.id)).toEqual(emptySaved)
+    expect((await client.tool('commit_edit', { ...edit, idempotency_key: randomUUID() })).code).toBe('outcome')
+    await expect.poll(async () => (await client.tool('get_outcome', edit)).receipt).toMatchObject({ status: 'applied', settlement: 'saved' })
+
+    const expected = structuredClone(emptyExpected)
+    expected.composition.patternInstances = [
+      { id: redInstanceId, pattern: { kind: 'user', id: 'mcp-red' }, patternName: 'Solid red', time: { timeScale: 1, timeOffsetMs: 0 } },
+      { id: greenInstanceId, pattern: { kind: 'user', id: 'mcp-green' }, patternName: 'Solid green', time: { timeScale: 1, timeOffsetMs: 0 } },
+    ]
+    expected.composition.layers = [{ id: layerId, zoneId, name: 'Authored sequence', rank: 0 }]
+    const appearance = (id: string, timeMs: number) => ({
+      keys: [{ id, timeMs, value: { opacity: 1, view: { mirror: false, phase: 0, brightness: 1 }, effects: [] } }],
+    })
+    expected.composition.clips = [
+      { id: redClipId, instanceId: redInstanceId, zoneId, layerId, startMs: 0, durationMs: 500,
+        entryPolicy: 'continue', zoneSampleMode: 'span', appearance: appearance(redAppearanceId, 0) },
+      { id: greenClipId, instanceId: greenInstanceId, zoneId, layerId, startMs: 500, durationMs: 500,
+        entryPolicy: 'continue', zoneSampleMode: 'span', appearance: appearance(greenAppearanceId, 500) },
+    ]
+    const saved = await assertStored(page, created, expected)
+    await expect(page.getByRole('button', { name: 'Select Solid red', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Select Solid green', exact: true })).toBeVisible()
+    await expect(page.getByRole('tree', { name: 'Shows', exact: true }).getByRole('treeitem', { name: created.name, exact: true })).toHaveAttribute('aria-selected', 'true')
+    const at250 = await harness.capture('authored-250', 250)
+    let faultExcerpt = ''
+    try { assertSamples(at250, [red, green]) } catch (error) { faultExcerpt = String(error).slice(0, 500) }
+    expect(faultExcerpt).toContain('Expected')
+    assertSamples(at250, [red, red])
+    assertSamples(await harness.capture('authored-750', 750), [green, green])
+
+    await client.close()
+    clientClosed = true
+    await page.reload()
+    await page.waitForFunction(id => (window as CaptureWindow).__pxlblzShow?.showId === id, created.id)
+    await page.evaluate(settings => (window as CaptureWindow).__pxlblzShow!.setPreview(settings), previewSettings)
+    await assertStored(page, created, expected)
+    await expect(page.getByRole('tree', { name: 'Shows', exact: true }).getByRole('treeitem', { name: created.name, exact: true })).toHaveAttribute('aria-selected', 'true')
+    assertSamples(await harness.capture('reload-250', 250), [red, red])
+    assertSamples(await harness.capture('reload-750', 750), [green, green])
+    reloadClient = await boundClient(page, created)
+    const reloadedRead = await reloadClient.tool('read_show', { binding_id: reloadClient.bindingId })
+    expect(reloadedRead.code).toBe('read')
+    expect(reloadedRead.show).toEqual(saved)
+    const artifacts = await downloadAndReopenShow(page, saved, harness.runDirectory, 'authored-reload')
+    await writeEvidence('create-sequence', testInfo, created, harness, client,
+      { setupMs: bindingStart - started, bindingMs, captureMs: harness.captureMs(), totalMs: performance.now() - started }, {
+        creation: { path: 'Studio Shows > Add show > New show > Create Portable Show', returnedUuid: created.id,
+          preexistingIdAbsent: true, starterClipsRemovedThroughMcp: starter.composition.clips.map(clip => clip.id) },
+        saves: ['starter removal saved', 'two-Clips authoring saved'], completeRecordAssertions: ['empty composition', 'authored composition', 'reload composition'],
+        reloadRead: { code: reloadedRead.code, id: (reloadedRead.show as ShowRecordV2).id, exact: true },
+        reloadTranscript: reloadClient.safeTranscript, faultControl: { image: at250.path, rejectedExpected: [red, green],
+          rejected: true, excerpt: faultExcerpt, restoredExpected: [red, red] }, artifacts,
+      }, browserErrors, 1166)
+  } finally {
+    if (reloadClient) await reloadClient.close()
+    if (!clientClosed) await client.close()
+  }
+})
+
+test('real MCP uploads a complete Show into a separate UI-created personal Show (#1166)', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  const started = performance.now()
+  const browserErrors: string[] = []
+  page.on('pageerror', error => browserErrors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error') browserErrors.push(message.text()) })
+  const created = await createPersonalShow(page, `MCP uploaded composition ${randomUUID().slice(0, 8)}`)
+  await openEditor(page, created)
+  const harness = captureHarness(page, testInfo, 'create-upload')
+  await harness.install()
+  const bindingStart = performance.now()
+  const client = await boundClient(page, created)
+  const bindingMs = performance.now() - bindingStart
+  let clientClosed = false
+  try {
+    const candidate = swappingZoneShow(created.id)
+    expect(candidate.name).not.toBe(created.name)
+    await replace(client, candidate, 'Upload two-Zone swapping content to this new personal Show')
+    const saved = await assertStored(page, created, candidate)
+    expect(saved.composition.clips.map(clip => clip.id)).not.toContain('clip-1')
+    expect(saved.composition.clips.map(clip => clip.id)).not.toContain('clip-2')
+    expect(saved.composition.transitions).toEqual([])
+    expect(saved.composition.patternInstances.map(instance => instance.pattern.id)).not.toContain('TestPattern1D')
+    expect(saved.composition.patternInstances.map(instance => instance.pattern.id)).not.toContain('CometLoom')
+    await expect(page.getByRole('tree', { name: 'Shows', exact: true }).getByRole('treeitem', { name: created.name, exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByRole('tree', { name: 'Built-in Shows', exact: true }).getByRole('treeitem', { name: created.name, exact: true })).toHaveCount(0)
+    const at250 = await harness.capture('uploaded-250', 250)
+    let faultExcerpt = ''
+    try { assertSamples(at250, [green, red]) } catch (error) { faultExcerpt = String(error).slice(0, 500) }
+    expect(faultExcerpt).toContain('Expected')
+    assertSamples(at250, [red, green])
+    assertSamples(await harness.capture('uploaded-750', 750), [green, red])
+
+    await client.close()
+    clientClosed = true
+    await page.reload()
+    await page.waitForFunction(id => (window as CaptureWindow).__pxlblzShow?.showId === id, created.id)
+    await page.evaluate(settings => (window as CaptureWindow).__pxlblzShow!.setPreview(settings), previewSettings)
+    await assertStored(page, created, candidate)
+    await expect(page.getByRole('tree', { name: 'Shows', exact: true }).getByRole('treeitem', { name: created.name, exact: true })).toHaveAttribute('aria-selected', 'true')
+    assertSamples(await harness.capture('reload-250', 250), [red, green])
+    assertSamples(await harness.capture('reload-750', 750), [green, red])
+    const artifacts = await downloadAndReopenShow(page, saved, harness.runDirectory, 'uploaded-reload')
+    await writeEvidence('create-upload', testInfo, created, harness, client,
+      { setupMs: bindingStart - started, bindingMs, captureMs: harness.captureMs(), totalMs: performance.now() - started }, {
+        creation: { path: 'Studio Shows > Add show > New show > Create Portable Show', returnedUuid: created.id,
+          preexistingIdAbsent: true, starterContentReplacedThroughMcp: true },
+        saves: ['uploaded replacement saved'], completeRecordAssertions: ['uploaded composition', 'reload composition'],
+        faultControl: { image: at250.path, rejectedExpected: [green, red], rejected: true,
+          excerpt: faultExcerpt, restoredExpected: [red, green] }, artifacts,
+      }, browserErrors, 1166)
+  } finally {
+    if (!clientClosed) await client.close()
+  }
+})
 
 test('real MCP replacement publishes known pixels, Undo/Redo, and reload (#1160)', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
