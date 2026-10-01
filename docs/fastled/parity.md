@@ -76,6 +76,11 @@ names to its compiled `fastled.js` path, then run
 timeouts, compiler/runtime errors and unequal output fail the run. It records
 per-example logs, source hashes, byte counts and virtual duration; only a fully
 passing run writes `evidence/report.json` with `complete: true`.
+`node test/fastled/build-wasm.mjs` compiles all six sketches sequentially with
+the installed official CLI and writes `.cache/wasm/modules.json` for this
+runner. `FASTLED_CLI` can select the CLI executable. It checks the generated
+library compile plan contains every upstream unity source file and keeps each
+compiler log under `.cache/wasm`.
 
 ## Upstream presentation differences
 
@@ -122,11 +127,32 @@ frame-stream SHA-256 hashes, compiler identity and the following coverage:
 
 Raw logs remain local under `.cache/evidence`; the committed hashes describe
 the parsed ordered frame arrays encoded with `JSON.stringify` and UTF-8.
-These are native execution and harness checks. The WASM recordings and the
-cross-target comparison remain pending; there is no claim of a passed
-native-versus-WASM corpus until those recordings are compared.
+The complete native-versus-WASM corpus then passed with exit 0. Every row in
+the table above matches exactly: **71,124 show records and 12,090,672 RGB
+bytes**, including timestamps, strip order and brightness. DemoReel100 crosses
+all six ten-second effect switches and ColorPalette crosses its full minute
+schedule. The WASM build used Emscripten 4.0.19 through FastLED CLI 2.0.22;
+native execution used Clang 21.1.5.
+
+`test/fastled/evidence/native-wasm-parity.json` contains the complete run's
+source hashes, WASM artifact hashes, exact frame-stream hashes and durations.
+Its compiler identity comes from the generated Meson compiler metadata. The
+raw recordings and compiler logs remain reproducible local cache artifacts.
+This proves the documented logical CRGB contract for these six fixtures and
+inputs. Actual IDE worker delivery, lifecycle and presentation are separate
+integration tests; arbitrary sketches and untested hardware APIs are not
+covered by this corpus.
 
 For trimmed source copies, set `UV_PYTHON` and `FASTLED_PYTHON_EXECUTABLE` to
 the same Python 3.11+ interpreter used by the compiler toolchain. Upstream
 Meson helpers invoke `uv run python`; without that explicit selection they
 may choose an older ambient interpreter lacking `tomllib`.
+On Windows, prepare with `--share-python-env` when the upstream source already
+has a working `.venv`. This creates an ignored junction to that Python
+environment. It prevents the CLI's fallback `python.cmd` from truncating
+Meson's multiline source-cache argument. The FastLED source and build caches
+remain separate. The corpus builder uses `RAYON_NUM_THREADS=4` and
+`EMCC_CORES=2` by default. A two-thread Rayon pool intermittently failed during
+CLI fingerprinting on this machine, and it also recurred with four threads.
+The builder retries only this specific pre-compilation failure up to three
+times and preserves every attempt's log; all other failures stop immediately.

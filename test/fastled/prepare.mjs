@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, writeFile, symlink, realpath, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -19,11 +19,25 @@ async function copyDirectory(source, destination) {
 const positional = process.argv.slice(2).filter(value => !value.startsWith('--'));
 const upstream = path.resolve(positional[0] ?? '');
 const out = path.resolve(positional[1] ?? path.join(here, '.cache'));
-if (!positional[0]) throw new Error('Usage: node test/fastled/prepare.mjs <FastLED-3.10.4> [output] [--reuse-source] [--with-build-tooling]');
+if (!positional[0]) throw new Error('Usage: node test/fastled/prepare.mjs <FastLED-3.10.4> [output] [--reuse-source] [--with-build-tooling] [--share-python-env]');
 const properties = await readFile(path.join(upstream, 'library.properties'), 'utf8');
 if (!/^version=3\.10\.4\r?$/m.test(properties)) throw new Error('Expected pinned FastLED 3.10.4');
 const library = path.join(out, 'FastLED');
 await mkdir(library, { recursive: true });
+// Reuse only the toolchain environment, never the upstream source/build cache.
+// The actual Python executable avoids the CLI's Windows .cmd fallback, which
+// truncates Meson's multiline source-cache argument after its first line.
+if (process.argv.includes('--share-python-env')) {
+  const environment = await realpath(path.join(upstream, '.venv'));
+  await stat(path.join(environment, process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python'));
+  const target = path.join(library, '.venv');
+  const existing = await realpath(target).catch(error => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (existing && existing !== environment) throw new Error(`Existing test Python environment differs: ${target}`);
+  if (!existing) await symlink(environment, target, process.platform === 'win32' ? 'junction' : 'dir');
+}
 if (!process.argv.includes('--reuse-source')) {
   await copyDirectory(path.join(upstream, 'src'), path.join(library, 'src'));
 }

@@ -8,7 +8,8 @@ const cache = path.resolve(process.argv[2] ?? path.join(path.dirname(fileURLToPa
 const provenance = JSON.parse(fs.readFileSync(path.join(cache, 'provenance.json')));
 const build = JSON.parse(fs.readFileSync(path.join(cache, 'native/build-manifest.json')));
 const steps = { Blink: 12, ColorPalette: 3000, Fire2012: 300, DemoReel100: 3600, Noise: 300, NoisePlusPalette: 300 };
-const report = { complete: false, crossTargetParity: false, kind: 'native-reference', fastled: provenance.fastled, compiler: build.compilerVersion.split('\n')[0], target: 'x86_64-w64-windows-gnu', sourceDigest: build.sourceDigest, seed: 1337, stepMicroseconds: 16667, examples: [] };
+const target = build.flags.find(flag => flag.startsWith('--target='))?.slice(9) ?? `${process.platform}/${process.arch}`;
+const report = { complete: false, crossTargetParity: false, kind: 'native-reference', fastled: provenance.fastled, compiler: build.compilerVersion.split('\n')[0], target, sourceDigest: build.sourceDigest, seed: 1337, stepMicroseconds: 16667, examples: [] };
 fs.mkdirSync(path.join(cache, 'evidence'), { recursive: true });
 fs.writeFileSync(path.join(cache, 'evidence/native-report.json'), `${JSON.stringify(report, null, 2)}\n`);
 for (const example of provenance.examples) {

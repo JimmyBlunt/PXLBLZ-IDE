@@ -2,7 +2,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { parseFrames, compareFrames } from './compare.mjs';
+import { hashTree } from './source-hash.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const manifestPath = process.argv[2];
@@ -10,10 +12,15 @@ if (!manifestPath) throw new Error('Usage: node test/fastled/run-corpus.mjs <was
 const modules = JSON.parse(await readFile(manifestPath, 'utf8'));
 const cache = path.resolve(process.argv[3] ?? path.join(here, '.cache'));
 const provenance = JSON.parse(await readFile(path.join(cache, 'provenance.json'), 'utf8'));
+const nativeBuild = JSON.parse(await readFile(path.join(cache, 'native/build-manifest.json'), 'utf8'));
+const wasmCompilers = JSON.parse(await readFile(path.join(cache, 'FastLED/.build/meson-wasm-quick/meson-info/intro-compilers.json'), 'utf8'));
 const output = path.join(cache, 'evidence');
 await mkdir(output, { recursive: true });
-const report = { contract: provenance.contract, fastled: provenance.fastled, startedAt: new Date().toISOString(), examples: [] };
+const report = { kind: 'native-wasm-logical-rgb-comparison', contract: provenance.contract, fastled: provenance.fastled, nativeCompiler: nativeBuild.compilerVersion.split('\n')[0], wasmCompiler: wasmCompilers.host.cpp.full_version, sourceDigest: nativeBuild.sourceDigest, seed: 1337, stepMicroseconds: 16667, startedAt: new Date().toISOString(), examples: [] };
 await writeFile(path.join(output, 'report.json'), `${JSON.stringify({ ...report, complete: false }, null, 2)}\n`);
+if ((await hashTree(path.join(cache, 'FastLED/src'))).sha256 !== nativeBuild.sourceDigest) {
+  throw new Error('Native build source differs from the prepared FastLED library; rebuild first');
+}
 
 // Long runs cross the official ten-second DemoReel switches and the complete
 // ColorPalette minute. Other effects still exercise many seeded noise frames.
@@ -30,13 +37,15 @@ function execute(command, args, logPath) {
     child.stdout.on('data', chunk => chunks.push(chunk));
     child.stderr.on('data', chunk => { errors += chunk; });
     child.on('error', error => { clearTimeout(deadline); reject(error); });
-    child.on('exit', async code => {
+    child.on('close', async code => {
       clearTimeout(deadline);
-      const stdout = Buffer.concat(chunks).toString('utf8');
-      await writeFile(logPath, stdout);
-      await writeFile(`${logPath}.stderr`, errors);
-      if (code !== 0) reject(new Error(`${command} exited ${code}: ${errors.slice(-2000)}`));
-      else resolve(stdout);
+      try {
+        const stdout = Buffer.concat(chunks).toString('utf8');
+        await writeFile(logPath, stdout);
+        await writeFile(`${logPath}.stderr`, errors);
+        if (code !== 0) throw new Error(`${command} exited ${code}: ${errors.slice(-2000)}`);
+        resolve(stdout);
+      } catch (error) { reject(error); }
     });
   });
 }
@@ -61,10 +70,11 @@ for (const example of provenance.examples) {
   checkProvenance(wasm, example, 'wasm');
   const frames = parseFrames(native);
   const comparison = compareFrames(frames, parseFrames(wasm));
-  const result = { name, loops: steps[name], ...comparison, lastVirtualTimeUs: frames.at(-1).timeUs, sourceFiles: example.sourceFiles };
+  const wasmBinary = await readFile(path.join(path.dirname(path.resolve(modules[name])), 'fastled.wasm'));
+  const result = { name, loops: steps[name], ...comparison, firstVirtualTimeUs: frames[0].timeUs, lastVirtualTimeUs: frames.at(-1).timeUs, frameSha256: createHash('sha256').update(JSON.stringify(frames)).digest('hex'), wasmSha256: createHash('sha256').update(wasmBinary).digest('hex'), sourceTreeSha256: example.sourceTreeSha256, sourceFiles: example.sourceFiles };
   report.examples.push(result);
   console.log(JSON.stringify(result));
   // Durable partial evidence remains explicitly partial until every case passes.
   await writeFile(path.join(output, 'partial-report.json'), `${JSON.stringify(report, null, 2)}\n`);
 }
-await writeFile(path.join(output, 'report.json'), `${JSON.stringify({ ...report, complete: true }, null, 2)}\n`);
+await writeFile(path.join(output, 'report.json'), `${JSON.stringify({ ...report, complete: true, completedAt: new Date().toISOString() }, null, 2)}\n`);
