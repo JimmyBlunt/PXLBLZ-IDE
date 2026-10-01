@@ -204,7 +204,7 @@ export function createCompilerServer(options = {}) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const port = Number(process.env.FASTLED_PORT ?? 9981);
+  const port = Number(process.env.FASTLED_PORT ?? 9982);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('FASTLED_PORT must be a valid port.');
   const origins = process.env.FASTLED_ORIGINS?.split(',').map((origin) => origin.trim()).filter(Boolean);
   createCompilerServer({ origins }).listen(port, '127.0.0.1', () => {

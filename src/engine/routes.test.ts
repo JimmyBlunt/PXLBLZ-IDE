@@ -8,6 +8,13 @@ import {
 } from './routes'
 
 describe('parseRoute', () => {
+  it('keeps the computer FastLED workspace separate from Studio Pattern routes', () => {
+    const fastled = { kind: 'fastled' } as const
+    expect(parseRoute('/PXLBLZ-IDE/fastled', '/PXLBLZ-IDE/')).toEqual(fastled)
+    expect(routePath(fastled, '/PXLBLZ-IDE/')).toBe('/PXLBLZ-IDE/fastled')
+    expect(routesEqual(fastled, { kind: 'fastled' })).toBe(true)
+    expect(parseRoute('/fastled/private', '/').kind).toBe('not-found')
+  })
   it('parses the root path as the public gallery', () => {
     expect(parseRoute('/', '/')).toEqual({ kind: 'gallery' })
   })

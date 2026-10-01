@@ -61,6 +61,14 @@ transforms are included because they are authored hardware intent.
 
 ## 2. Routes, surfaces, and authentication
 
+The `/fastled` workspace is a separate computer-only C++ authoring surface.
+`src/engine/fastled/` loads original FastLED WASM in a dedicated worker and
+passes copied RGB frames to the same WebGL renderer. A local compiler service
+(`npm run fastled:serve`) builds against pinned FastLED 3.10.4. Source is held
+in the current session with explicit `.ino` import/download; it does not enter
+Pixelblaze Pattern persistence, Show compilation, or Controller pushes.
+See `docs/fastled/feasibility.md` for acceptance status and compatibility limits.
+
 The pure route codec is `src/engine/routes.ts`; `routerStore` owns History API
 mutation; `App.tsx` performs the route/store join after collections resolve.
 

@@ -13,7 +13,7 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then:
 uv tool install fastled==2.0.22
 git clone --branch 3.10.4 --depth 1 https://github.com/FastLED/FastLED.git C:/src/FastLED-3.10.4
 $env:FASTLED_PATH = 'C:/src/FastLED-3.10.4'
-npm run preflight -- port 9981
+npm run preflight -- port 9982
 node scripts/fastled/server.mjs
 ```
 
@@ -21,7 +21,7 @@ The official CLI installs its compiler dependencies on the first compilation.
 This can take several minutes and requires network access and free disk space.
 `FASTLED_CLI` optionally specifies the executable path. The subprocess uses
 explicit arguments and never invokes a command shell. `FASTLED_PORT` defaults
-to 9981. The server binds exclusively to `127.0.0.1`.
+to 9982. The server binds exclusively to `127.0.0.1`.
 
 The normal local development origins on ports 5174 and 5184 are allowed.
 `FASTLED_ORIGINS` replaces that list with comma-separated exact origins; add

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef, useEffect, useLayoutEffect } from 'react'
+import { useState, useCallback, useMemo, useRef, useEffect, useLayoutEffect, lazy, Suspense } from 'react'
 import { Braces, Code2, Cpu, Film, Images, Lock, LogIn, Map as MapIcon, X } from 'lucide-react'
 import { controlIcon } from '@/components/iconScale'
 import { Button } from '@/components/ui/button'
@@ -126,6 +126,8 @@ import { useStudioPlaceStore } from '@/store/studioPlaceStore'
 import { useStudioEntityDrawerStore } from '@/store/studioEntityDrawerStore'
 import { requestBufferReplacement } from '@/store/navigationPreflightStore'
 import { AgentDrawerWorkspace } from '@/components/agent/AgentDrawer'
+
+const FastLedWorkspace = lazy(() => import('@/components/FastLedWorkspace').then((module) => ({ default: module.FastLedWorkspace })))
 
 function Splitter({
   onDrag,
@@ -1053,7 +1055,7 @@ function StudioApp() {
           workspace branch. */}
       <NavigationSaveFailureNotice />
       <NavigationPreflightDialog />
-      <header data-testid="top-bar" className="flex h-[40px] min-h-[40px] shrink-0 flex-nowrap items-center border-b border-seam bg-panel px-2 min-[430px]:px-3 sm:px-4">
+      {route.kind !== 'fastled' && <header data-testid="top-bar" className="flex h-[40px] min-h-[40px] shrink-0 flex-nowrap items-center border-b border-seam bg-panel px-2 min-[430px]:px-3 sm:px-4">
         <a
           href={import.meta.env.BASE_URL}
           aria-label="PXLBLZ home"
@@ -1117,8 +1119,9 @@ function StudioApp() {
             </Button>
           )}
           <AuthStatus />
+          <Button size="sm" variant="outline" onClick={() => navigate({ kind: 'fastled' })} title="Open FastLED computer preview">FastLED</Button>
         </span>
-      </header>
+      </header>}
       {authNotice && (
         <div
           role="alert"
@@ -1139,7 +1142,11 @@ function StudioApp() {
           </button>
         </div>
       )}
-      {route.kind === 'gallery' ? (
+      {route.kind === 'fastled' ? (
+        <Suspense fallback={<div role="status" className="p-4">Loading FastLED workspace…</div>}>
+          <FastLedWorkspace onClose={() => navigate({ kind: 'gallery' })} />
+        </Suspense>
+      ) : route.kind === 'gallery' ? (
         invalidGalleryDirectoryRoute ? (
           <RouteMessage
             title="Gallery directory not found"
