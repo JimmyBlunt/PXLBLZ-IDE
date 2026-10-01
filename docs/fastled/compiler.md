@@ -36,16 +36,20 @@ multi-tenant security sandbox.
   count of running/queued compilations. This endpoint checks the service, not
   whether the toolchain has completed its first installation.
 - `POST /compile`, with `Content-Type: application/json` and
-  `{ "source": "...", "name": "optional display name" }`, accepts one sketch.
+  `{ "source": "...", "files": { "helper.h": "..." }, "name": "optional display name" }`, accepts one sketch.
   The name does not affect filesystem paths. Success returns `id`, `moduleUrl`,
   optional `wasmUrl`, `diagnostics`, and `fastledVersion`.
 - `GET /builds/<sha256>/<asset>` serves only compiler JavaScript/WASM/data
   assets. Source, manifests, and arbitrary local paths are not served.
 
-Source is limited to 1 MiB, diagnostics to the last 128 KiB, each compile to ten
+Source and supporting files together are limited to 1 MiB, diagnostics to the last 128 KiB, each compile to ten
 minutes, and the queue to three requests including the active one. Builds run
 serially; identical concurrent requests share a build. The cache key includes
-the source, pinned version, and frame observer. Completed assets are cached in
+the source and sorted supporting files, pinned version, Git revision, compiler
+version, bridge ABI, and frame observer. The selected library must be a clean
+Git checkout; modified library/compiler sources are rejected. A missing cached
+asset triggers recompilation. Restart the service after upgrading the CLI.
+Completed assets are cached in
 the operating system temporary directory under `pxlblz-fastled-3.10.4/builds`.
 Temporary source directories are removed after each build. Cache artifacts can
 be removed while the service is stopped to reclaim space.
@@ -70,8 +74,11 @@ official WASM ABI. Observing every show preserves sketches such as Blink that
 show multiple different states within one `loop()` invocation. No FastLED
 integer arithmetic, color conversion, or user source expressions are rewritten.
 
-The source API currently accepts a single `.ino` body plus standard FastLED
-headers. Additional user source files, external Arduino libraries, hardware
+The source API accepts one `.ino` body and up to 32 named `.h`, `.hpp`, `.cpp`,
+or `.c` supporting files plus standard FastLED headers. Filenames must be flat,
+start with an ASCII letter or digit, and cannot contain `..`, alias another
+filename by case, use Windows device names, or replace the generated adapter.
+External Arduino libraries, hardware
 peripherals and on-device timing are separate capabilities, not a claim of
 universal Arduino firmware compatibility.
 

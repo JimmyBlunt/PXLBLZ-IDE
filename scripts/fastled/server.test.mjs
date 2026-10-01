@@ -9,7 +9,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request } from 'node:http';
-import { createCompiler, createCompilerServer, CompileError, runCompiler } from './server.mjs';
+import { createCompiler, createCompilerServer, CompileError, runCompiler, validateSketchFiles } from './server.mjs';
 
 async function fixture(t, run) {
   const root = await mkdtemp(join(tmpdir(), 'pxlblz-compiler-test-'));
@@ -17,7 +17,7 @@ async function fixture(t, run) {
   const library = join(root, 'library');
   await mkdir(library);
   await writeFile(join(library, 'library.properties'), 'version=3.10.4\n');
-  const compiler = createCompiler({ cacheRoot: root, fastledPath: library, run });
+  const compiler = createCompiler({ cacheRoot: root, fastledPath: library, run, fingerprint: async () => 'test-compiler-and-library-revision' });
   return { root, library, compiler };
 }
 
@@ -25,6 +25,7 @@ async function fakeCompile(_command, args) {
   assert.ok(args.includes('--just-compile'));
   assert.ok(args.includes('--no-app'));
   assert.ok(args.includes('--no-interactive'));
+  assert.equal(args[args.indexOf('--link') + 1], 'static');
   const output = join(args[0], 'fastled_js');
   await mkdir(output);
   await writeFile(join(output, 'fastled.js'), 'var fastled = async () => ({ wasm: true });');
@@ -87,6 +88,54 @@ test('sketch configuration precedes the adapter and a wrong library version is r
   await compiler.compile(source);
   await writeFile(join(library, 'library.properties'), 'version=3.10.3\n');
   await assert.rejects(compiler.compile(source), { status: 503 });
+});
+
+test('multi-file sketches preserve source, share reordered keys, and rebuild missing wasm', async (t) => {
+  let runs = 0;
+  const { compiler, root } = await fixture(t, async (...args) => {
+    runs++;
+    assert.equal(await readFile(join(args[1][0], 'NoisePlusPalette.h'), 'utf8'), '#define PALETTE_SIZE 16');
+    return fakeCompile(...args);
+  });
+  const files = { 'NoisePlusPalette.h': '#define PALETTE_SIZE 16', 'helper.cpp': 'int helper = 1;' };
+  const first = await compiler.compile('#include "NoisePlusPalette.h"', files);
+  const reordered = await compiler.compile('#include "NoisePlusPalette.h"', { 'helper.cpp': files['helper.cpp'], 'NoisePlusPalette.h': files['NoisePlusPalette.h'] });
+  assert.equal(first.id, reordered.id);
+  assert.equal(runs, 1);
+  await rm(join(root, first.wasmUrl));
+  await compiler.compile('#include "NoisePlusPalette.h"', files);
+  assert.equal(runs, 2);
+  const changed = await compiler.compile('#include "NoisePlusPalette.h"', { ...files, 'helper.cpp': 'int helper = 2;' });
+  assert.notEqual(changed.id, first.id);
+});
+
+test('rejects sketch path traversal, reserved files, aliases, and aggregate size overflow', () => {
+  for (const name of ['../secret.h', 'dir/file.h', 'dir\\file.h', '..evil.h', 'pxlblz-frame-adapter.h', 'PXLBLZ-FRAME-ADAPTER.H', 'Sketch.ino', 'con.h', 'NUL.cpp']) {
+    assert.throws(() => validateSketchFiles('source', { [name]: 'text' }), { status: 400 });
+  }
+  assert.throws(() => validateSketchFiles('source', { 'Foo.h': '', 'foo.h': '' }), { status: 400 });
+  assert.throws(() => validateSketchFiles('source', { 'x.h': 'x'.repeat(1024 * 1024) }), { status: 413 });
+  assert.throws(() => validateSketchFiles('source', { 'x.h': null }), { status: 400 });
+  assert.throws(() => validateSketchFiles('source', { ['x'.repeat(127) + '.h']: '' }), { status: 400 });
+  assert.throws(() => validateSketchFiles('source', Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`file${i}.h`, '']))), { status: 400 });
+});
+
+test('library/compiler revision participates in the immutable build identity', async (t) => {
+  const { root, library } = await fixture(t, fakeCompile);
+  let revision = 'compiler-2.0.22-library-a';
+  const compiler = createCompiler({ cacheRoot: root, fastledPath: library, run: fakeCompile, fingerprint: async () => revision });
+  const first = await compiler.compile('source');
+  revision = 'compiler-2.0.23-library-a';
+  assert.notEqual((await compiler.compile('source')).id, first.id);
+});
+
+test('refuses ambiguous dynamic WASM output despite a successful compiler exit', async (t) => {
+  const { compiler } = await fixture(t, async (...args) => {
+    const result = await fakeCompile(...args);
+    await writeFile(join(args[1][0], 'fastled_js', 'sketch.wasm'), 'side-module');
+    return result;
+  });
+  await assert.rejects(compiler.compile('source'), { status: 502 });
 });
 
 test('HTTP enforces local origin, host, JSON, and asset path boundaries', async (t) => {

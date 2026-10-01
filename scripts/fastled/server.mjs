@@ -15,6 +15,28 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ORIGINS = ['http://localhost:5174', 'http://127.0.0.1:5174', 'http://localhost:5184', 'http://127.0.0.1:5184'];
 const SOURCE_LIMIT = 1024 * 1024;
 const LOG_LIMIT = 128 * 1024;
+const BRIDGE_ABI = 'pxlblz-fastled-2';
+
+export function validateSketchFiles(source, files = {}) {
+  if (typeof source !== 'string' || !source.trim()) throw new CompileError('source must be a non-empty string.', 400);
+  if (!files || typeof files !== 'object' || Array.isArray(files)) throw new CompileError('files must be a filename-to-source object.', 400);
+  if (Object.keys(files).length > 32) throw new CompileError('A sketch may contain at most 32 supporting files.', 400);
+  let size = Buffer.byteLength(source);
+  const names = new Set();
+  const sorted = [];
+  for (const [name, contents] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
+    const lower = name.toLowerCase();
+    if (name.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9_.-]*\.(?:h|hpp|cpp|c)$/i.test(name) || name.includes('..') || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])\./i.test(name) || lower === 'pxlblz-frame-adapter.h' || names.has(lower)) {
+      throw new CompileError(`Unsupported or duplicate sketch filename: ${name}`, 400);
+    }
+    if (typeof contents !== 'string') throw new CompileError(`File ${name} must contain text.`, 400);
+    names.add(lower);
+    size += Buffer.byteLength(contents);
+    sorted.push([name, contents]);
+  }
+  if (size > SOURCE_LIMIT) throw new CompileError('Sketch and files exceed the 1 MiB limit.', 413);
+  return sorted;
+}
 
 export class CompileError extends Error {
   constructor(message, status = 422, diagnostics = message) {
@@ -73,22 +95,36 @@ export function createCompiler(options = {}) {
   const run = options.run ?? runCompiler;
   const timeoutMs = options.timeoutMs ?? 10 * 60 * 1000;
   const maxPending = options.maxPending ?? 3;
+  let compilerVersion;
+  const fingerprint = options.fingerprint ?? (async () => {
+    compilerVersion ??= runCompiler(command, ['--version'], { cwd: fastledPath, timeoutMs: 60_000 }).catch((error) => { compilerVersion = undefined; throw error; });
+    const [version, revision, dirty] = await Promise.all([
+      compilerVersion,
+      runCompiler('git', ['rev-parse', 'HEAD'], { cwd: fastledPath, timeoutMs: 30_000 }),
+      runCompiler('git', ['status', '--porcelain', '--untracked-files=all', '--', 'src', 'ci', 'library.properties', 'meson.build', 'meson_options.txt'], { cwd: fastledPath, timeoutMs: 30_000 }),
+    ]);
+    if (dirty.trim()) throw new CompileError('FASTLED_PATH has modified compiler/library sources. Use a clean pinned checkout for reproducible builds.', 503);
+    return version.trim() + '\0' + revision.trim();
+  });
   const inFlight = new Map();
   let tail = Promise.resolve();
   let pending = 0;
 
-  async function compile(source) {
-    if (typeof source !== 'string' || !source.trim()) throw new CompileError('source must be a non-empty string.', 400);
-    if (Buffer.byteLength(source) > SOURCE_LIMIT) throw new CompileError('Sketch exceeds the 1 MiB limit.', 413);
+  async function compile(source, files = {}) {
+    const sketchFiles = validateSketchFiles(source, files);
     if (!fastledPath) throw new CompileError('Set FASTLED_PATH to the pinned FastLED 3.10.4 source checkout.', 503);
     const properties = await readFile(join(fastledPath, 'library.properties'), 'utf8').catch(() => '');
     if (!/^version=3\.10\.4\s*$/m.test(properties)) throw new CompileError('FASTLED_PATH must contain FastLED version 3.10.4.', 503);
     const adapter = await readFile(join(HERE, 'frame-adapter.h'), 'utf8');
-    const id = createHash('sha256').update(FASTLED_VERSION + '\0' + adapter + '\0' + source).digest('hex');
+    const toolchain = await fingerprint();
+    const id = createHash('sha256').update(JSON.stringify([BRIDGE_ABI, FASTLED_VERSION, toolchain, adapter, source, sketchFiles])).digest('hex');
     const directory = join(cacheRoot, 'builds', id);
     const manifestPath = join(directory, 'manifest.json');
     const cached = await readFile(manifestPath, 'utf8').then(JSON.parse).catch(() => null);
-    if (cached && await stat(join(directory, 'module.mjs')).catch(() => null)) return cached;
+    if (cached?.result && Array.isArray(cached.assets) && cached.assets.includes('module.mjs')) {
+      const intact = await Promise.all(cached.assets.map((name) => stat(join(directory, basename(name))).then((file) => file.isFile()).catch(() => false)));
+      if (intact.every(Boolean)) return cached.result;
+    }
     if (inFlight.has(id)) return inFlight.get(id);
     if (pending >= maxPending) throw new CompileError('Compiler queue is full. Try again after the current build.', 429);
     pending++;
@@ -102,7 +138,8 @@ export function createCompiler(options = {}) {
       // remains effective before the first FastLED.h include.
       await writeFile(join(sketch, 'Sketch.ino'), '#line 1 "Sketch.ino"\n' + source + '\n#include "pxlblz-frame-adapter.h"\n');
       await writeFile(join(sketch, 'pxlblz-frame-adapter.h'), adapter);
-      const args = [sketch, '--just-compile', '--no-app', '--no-interactive', '--fastled-path', resolve(fastledPath)];
+      for (const [name, contents] of sketchFiles) await writeFile(join(sketch, name), contents);
+      const args = [sketch, '--just-compile', '--no-app', '--no-interactive', '--link', 'static', '--fastled-path', resolve(fastledPath)];
       const diagnostics = await run(command, args, { cwd: work, timeoutMs });
       const files = await filesUnder(work);
       const candidates = files.filter((file) => /(?:fastled|sketch)\.(?:js|mjs)$/i.test(basename(file)));
@@ -121,9 +158,12 @@ export function createCompiler(options = {}) {
       // Upstream -sMODULARIZE=1 -sEXPORT_NAME=fastled emits a classic factory.
       // The wrapper is a separate asset: original compiler output is retained.
       await writeFile(join(directory, 'module.mjs'), /\bexport\s+default\b/.test(original) ? original : original + '\nexport default fastled;\n');
-      const wasmFile = (await readdir(directory)).find((file) => file.endsWith('.wasm'));
+      const wasmFiles = (await readdir(directory)).filter((file) => file.endsWith('.wasm'));
+      if (wasmFiles.length !== 1) throw new CompileError('Static compilation must produce exactly one WASM module.', 502, diagnostics);
+      const wasmFile = wasmFiles[0];
       const result = { id, moduleUrl: `/builds/${id}/module.mjs`, ...(wasmFile ? { wasmUrl: `/builds/${id}/${wasmFile}` } : {}), diagnostics, fastledVersion: FASTLED_VERSION };
-      await writeFile(manifestPath, JSON.stringify(result));
+      const assets = (await readdir(directory)).filter((file) => /\.(?:js|mjs|wasm|data|mem)$/.test(file));
+      await writeFile(manifestPath, JSON.stringify({ result, assets, toolchain }));
       return result;
       } finally {
         // Only delete the exact generated work directory inside this cache.
@@ -177,7 +217,7 @@ export function createCompilerServer(options = {}) {
       if (request.method === 'GET' && path === '/health') return json(response, 200, { status: 'ok', fastledVersion: FASTLED_VERSION, pending: compiler.pending });
       if (request.method === 'POST' && path === '/compile') {
         const body = await readJson(request);
-        const result = await compiler.compile(body?.source);
+        const result = await compiler.compile(body?.source, body?.files);
         const base = `http://${host}`;
         return json(response, 200, { ...result, moduleUrl: base + result.moduleUrl, ...(result.wasmUrl ? { wasmUrl: base + result.wasmUrl } : {}) });
       }
