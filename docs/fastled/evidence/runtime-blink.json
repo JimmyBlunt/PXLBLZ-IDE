@@ -1,0 +1,56 @@
+{
+  "capturedAt": "2026-10-01T23:01:19.851Z",
+  "artifact": {
+    "id": "254365e7c061f72607a52f2842de97cc89a731a73933187b2244a7b4a8cd2840",
+    "moduleUrl": "http://127.0.0.1:9982/builds/254365e7c061f72607a52f2842de97cc89a731a73933187b2244a7b4a8cd2840/module.mjs",
+    "wasmUrl": "http://127.0.0.1:9982/builds/254365e7c061f72607a52f2842de97cc89a731a73933187b2244a7b4a8cd2840/fastled.wasm",
+    "fastledVersion": "3.10.4",
+    "runtimeUrl": "http://127.0.0.1:9982/builds/254365e7c061f72607a52f2842de97cc89a731a73933187b2244a7b4a8cd2840/fastled.js"
+  },
+  "url": "http://127.0.0.1:5184/PXLBLZ-IDE/fastled",
+  "isolated": true,
+  "frames": [
+    [
+      255,
+      0,
+      0
+    ],
+    [
+      255,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      255,
+      0,
+      0
+    ],
+    [
+      255,
+      0,
+      0
+    ]
+  ],
+  "failures": [],
+  "pausedCount": 4,
+  "disposedCount": 5,
+  "errors": [],
+  "commit": "de698cd46f9b1f1edeb527b867367f063590df02",
+  "dirty": "M docs/fastled/compiler.md\n M docs/fastled/parity.md\n M scripts/fastled/server.mjs\n M scripts/fastled/server.test.mjs\n M src/App.tsx\n M src/engine/fastled/examples.ts\n M src/engine/fastled/frames.test.ts\n M src/engine/fastled/frames.ts\n M src/engine/fastled/index.test.ts\n M src/engine/fastled/index.ts\n M src/engine/fastled/runtime.worker.ts\n M test/fastled/prepare.mjs\n M vite.config.ts",
+  "passed": [
+    "real WASM Blink RGB frames",
+    "intermediate shows",
+    "pause delivery",
+    "reset",
+    "dispose"
+  ],
+  "excluded": [
+    "full native/WASM corpus parity",
+    "physical LED output"
+  ]
+}

@@ -1,5 +1,6 @@
 import { copyFastLedFrame, copyFastLedLayout, type FastLedModule } from './frames'
 import type { FastLedArtifact } from './index'
+import { writeFastLedMailbox } from './mailbox'
 
 // A worker owns the entire C++ instance. A blocking delay or loop never runs on
 // the editor thread; reset/dispose can terminate it without cooperation.
@@ -12,28 +13,23 @@ let running = false
 let stepping = false
 let timer: ReturnType<typeof setTimeout> | undefined
 let callbackCount = 0
-let lastSentAt = -Infinity
+let mailbox: SharedArrayBuffer | undefined
 let lastLayout = ''
 
 function sendFrame() {
   if (!module) return
   callbackCount++
-  // Preserve blocking Blink-style intermediate shows while bounding transport
-  // from sketches that call show thousands of times per loop. This is monitor
-  // sampling only: no C++ state or clock is changed. Parity captures every show
-  // independently of this display-rate limit.
-  const now = performance.now()
-  if (now - lastSentAt < 1000 / 120) return
   const frame = copyFastLedFrame(module)
   if (frame.length) {
-    lastSentAt = now
+    // Always retain the final show before a blocking delay. Sampling here would
+    // lose that persistent color; posting every frame would grow an unbounded
+    // queue. The UI samples this single shared slot independently of C++.
     const positions = copyFastLedLayout(module, frame.length / 3)
     const layout = JSON.stringify(positions)
-    if (layout !== lastLayout) {
-      lastLayout = layout
-      scope.postMessage({ type: 'layout', positions: positions ?? [] })
-    }
-    scope.postMessage({ type: 'frame', frame }, [frame.buffer])
+    // RGB and geometry share one sequence, including dynamic maps. A pause or
+    // blocked loop cannot strand the latest layout in a discarded message.
+    if (mailbox) writeFastLedMailbox(mailbox, frame, layout !== lastLayout ? positions : undefined)
+    lastLayout = layout
   }
 }
 
@@ -59,12 +55,24 @@ async function tick() {
 }
 
 async function load(artifact: FastLedArtifact) {
+  if (!globalThis.crossOriginIsolated || typeof SharedArrayBuffer === 'undefined') {
+    throw new Error('FastLED needs an isolated browser page for WebAssembly threads. Reload the FastLED workspace from its own URL; the host must provide COOP and COEP headers.')
+  }
   const imported = await import(/* @vite-ignore */ artifact.moduleUrl) as {
     default: (options: Record<string, unknown>) => Promise<FastLedModule>
   }
   if (typeof imported.default !== 'function') throw new Error('FastLED compiler artifact has no module factory.')
+  if (!artifact.runtimeUrl) throw new Error('The FastLED compiler must provide its classic pthread runtime. Restart the updated compiler service and compile again.')
+  // Browser workers cannot be constructed directly from the compiler's other
+  // origin. A same-origin blob loads the unchanged classic Emscripten factory;
+  // pthread workers must not load our ESM wrapper. Its URL lives with this
+  // owning worker and remains valid for threads created after initialization.
+  const pthreadBootstrap = URL.createObjectURL(new Blob([
+    `importScripts(${JSON.stringify(artifact.runtimeUrl)});`,
+  ], { type: 'application/javascript' }))
   module = await imported.default({
     noInitialRun: true,
+    mainScriptUrlOrBlob: pthreadBootstrap,
     // Preserve each upstream filename, including side modules if the compiler
     // emits more than one WASM asset. Never redirect all modules to one binary.
     locateFile: (file: string) => new URL(file, artifact.moduleUrl).href,
@@ -78,8 +86,11 @@ async function load(artifact: FastLedArtifact) {
   if (running) void tick()
 }
 
-scope.onmessage = (event: MessageEvent<{ type: string; artifact?: FastLedArtifact }>) => {
-  if (event.data.type === 'load' && event.data.artifact) void load(event.data.artifact).catch(fail)
+scope.onmessage = (event: MessageEvent<{ type: string; artifact?: FastLedArtifact; mailbox?: SharedArrayBuffer }>) => {
+  if (event.data.type === 'load' && event.data.artifact) {
+    mailbox = event.data.mailbox
+    void load(event.data.artifact).catch(fail)
+  }
   else if (event.data.type === 'start' && !running) { running = true; lastLayout = ''; void tick() }
   else if (event.data.type === 'pause') { running = false; clearTimeout(timer) }
 }

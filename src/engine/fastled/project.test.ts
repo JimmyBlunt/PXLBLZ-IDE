@@ -15,7 +15,7 @@ describe('FastLED project files', () => {
     expect(parseFastLedProject(project()).source).toBe('')
   })
 
-  it.each(['../secret.h', '/secret.h', 'subdir/code.cpp', 'C:\\secret.h', 'file..h', 'pxlblz-frame-adapter.h', 'NUL.h', '.hidden.h', 'script.js', 'Sketch.ino'])('rejects unsafe or unsupported file %s', (name) => {
+  it.each(['../secret.h', '/secret.h', 'subdir/code.cpp', 'C:\\secret.h', 'file..h', 'pxlblz-frame-adapter.h', 'NUL.h', '.hidden.h', 'script.js', 'Sketch.ino', 'file.c', 'file.CPP'])('rejects unsafe or unsupported file %s', (name) => {
     expect(() => parseFastLedProject(project({ [name]: '' }))).toThrow()
   })
 

@@ -10,10 +10,11 @@ export interface FastLedProject {
 }
 
 export function validateFastLedFilename(name: string): void {
-  if (name.length > 128 || name.includes('..') || !/^[a-z0-9][a-z0-9_.-]*\.(?:h|hpp|cpp|c)$/i.test(name)
+  if (name.length > 128 || name.includes('..') || !/^[a-z0-9][a-z0-9_.-]*\.(?:h|hpp|cpp)$/i.test(name)
+    || (/\.cpp$/i.test(name) && !name.endsWith('.cpp'))
     || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])\./i.test(name)
     || name.toLowerCase() === 'pxlblz-frame-adapter.h') {
-    throw new Error('Support files need a simple .h, .hpp, .cpp, or .c filename without folders or reserved names.')
+    throw new Error('Support files need a simple .h, .hpp or lowercase .cpp filename without folders or reserved names. This compiler does not compile .c or uppercase .CPP files.')
   }
 }
 

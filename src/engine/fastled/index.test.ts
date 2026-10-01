@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { compileFastLed, createFastLedRuntime } from './index'
+import { writeFastLedMailbox } from './mailbox'
 
 const artifact = { id: 'demo', moduleUrl: 'http://127.0.0.1:9981/builds/demo/module.mjs', fastledVersion: '3.10.4' }
 
@@ -24,6 +25,14 @@ describe('FastLED compiler client', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('null')))
     await expect(compileFastLed({ source: 'void loop(){}', compilerUrl: 'http://127.0.0.1:9981' })).rejects.toThrow('invalid response')
   })
+  it('validates and resolves the classic pthread bootstrap alongside the module', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...artifact, runtimeUrl: '/builds/demo/fastled.js' })))
+    vi.stubGlobal('fetch', fetch)
+    const result = await compileFastLed({ source: 'void loop(){}', compilerUrl: 'http://127.0.0.1:9981' })
+    expect(result.runtimeUrl).toBe('http://127.0.0.1:9981/builds/demo/fastled.js')
+    fetch.mockResolvedValue(new Response(JSON.stringify({ ...artifact, runtimeUrl: 'https://example.com/thread.js' })))
+    await expect(compileFastLed({ source: 'void loop(){}', compilerUrl: 'http://127.0.0.1:9981' })).rejects.toThrow('outside its local service')
+  })
 })
 
 class FakeWorker {
@@ -37,6 +46,38 @@ class FakeWorker {
 }
 
 describe('FastLED worker ownership', () => {
+  it('samples the latest shared frame and isolates polling across pause, reset and stale errors', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('Worker', FakeWorker)
+    FakeWorker.instances = []
+    const onFrame = vi.fn(), onError = vi.fn()
+    const pending = createFastLedRuntime({ artifact, onFrame, onError })
+    const first = FakeWorker.instances[0]
+    first.send({ type: 'ready' })
+    const runtime = await pending
+    runtime.start()
+    const mailbox = first.postMessage.mock.calls[0][0].mailbox as SharedArrayBuffer
+    writeFastLedMailbox(mailbox, new Uint8Array([255, 0, 0]))
+    writeFastLedMailbox(mailbox, new Uint8Array([0, 0, 255]))
+    await vi.advanceTimersByTimeAsync(20)
+    expect([...onFrame.mock.calls[0][0]]).toEqual([0, 0, 255])
+    runtime.pause()
+    writeFastLedMailbox(mailbox, new Uint8Array([0, 255, 0]))
+    await vi.advanceTimersByTimeAsync(20)
+    expect(onFrame).toHaveBeenCalledOnce()
+    runtime.reset()
+    const second = FakeWorker.instances[1]
+    second.send({ type: 'ready' })
+    runtime.start()
+    first.onerror?.({ message: 'stale worker error' })
+    writeFastLedMailbox(second.postMessage.mock.calls[0][0].mailbox, new Uint8Array([1, 2, 3]))
+    await vi.advanceTimersByTimeAsync(20)
+    expect([...onFrame.mock.calls[1][0]]).toEqual([1, 2, 3])
+    expect(onError).not.toHaveBeenCalled()
+    runtime.dispose()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(onFrame).toHaveBeenCalledTimes(2)
+  })
   it('shows setup animations before initialization returns', async () => {
     vi.stubGlobal('Worker', FakeWorker)
     FakeWorker.instances = []

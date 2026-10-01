@@ -1,0 +1,41 @@
+{
+  "capturedAt": "2026-10-01T23:10:07.737Z",
+  "artifact": {
+    "id": "3eebc6a157c0962d676b6530b3d4564b62d8c701401d027377d3eb91e18bf2f6",
+    "moduleUrl": "http://127.0.0.1:9982/builds/3eebc6a157c0962d676b6530b3d4564b62d8c701401d027377d3eb91e18bf2f6/module.mjs",
+    "runtimeUrl": "http://127.0.0.1:9982/builds/3eebc6a157c0962d676b6530b3d4564b62d8c701401d027377d3eb91e18bf2f6/fastled.js",
+    "wasmUrl": "http://127.0.0.1:9982/builds/3eebc6a157c0962d676b6530b3d4564b62d8c701401d027377d3eb91e18bf2f6/fastled.wasm",
+    "fastledVersion": "3.10.4"
+  },
+  "url": "http://127.0.0.1:5184/PXLBLZ-IDE/fastled",
+  "isolated": true,
+  "frames": [
+    [
+      0,
+      0,
+      255
+    ],
+    [
+      0,
+      0,
+      255
+    ]
+  ],
+  "failures": [],
+  "pausedCount": 1,
+  "disposedCount": 2,
+  "firstTargetLatencyMs": 40.69500005245209,
+  "errors": [],
+  "commit": "82fcab73ee0b1c28c58cd0d1c2d5e75b1bde019a",
+  "dirty": "M docs/fastled/compiler.md\n M docs/fastled/parity.md\n M scripts/fastled/server.mjs\n M scripts/fastled/server.test.mjs\n M src/components/FastLedWorkspace.tsx\n M src/engine/fastled/examples.ts\n M src/engine/fastled/frames.test.ts\n M src/engine/fastled/frames.ts\n M src/engine/fastled/index.test.ts\n M src/engine/fastled/index.ts\n M src/engine/fastled/project.test.ts\n M src/engine/fastled/project.ts\n M src/engine/fastled/runtime.worker.ts\n M test/fastled/prepare.mjs\n M test/fastled/run-corpus.mjs\n M test/fastled/run-native.mjs",
+  "passed": [
+    "rapid shows retain final blue during blocking delay",
+    "pause delivery",
+    "reset",
+    "dispose"
+  ],
+  "excluded": [
+    "full native/WASM corpus parity",
+    "physical LED output"
+  ]
+}

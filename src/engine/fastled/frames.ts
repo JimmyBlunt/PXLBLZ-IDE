@@ -23,7 +23,8 @@ export function copyFastLedLayout(module: FastLedModule, pixelCount: number): [n
     const length = new DataView(module.HEAPU8.buffer, module.HEAPU8.byteOffset).getInt32(sizePointer, true)
     if (length > 4 * 1024 * 1024) throw new Error('FastLED layout exceeds the preview limit.')
     checkedRange(module.HEAPU8, pointer, length)
-    const json: unknown = JSON.parse(new TextDecoder().decode(module.HEAPU8.subarray(pointer, pointer + length)).replace(/\0$/, ''))
+    // Threaded WASM memory is shared; TextDecoder only accepts an unshared view.
+    const json: unknown = JSON.parse(new TextDecoder().decode(module.HEAPU8.slice(pointer, pointer + length)).replace(/\0$/, ''))
     if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Error('Invalid FastLED layout metadata.')
     const positions: [number, number][] = []
     const maps = json as Record<string, { strips?: Record<string, { map?: { x?: unknown; y?: unknown } }> }>
@@ -73,7 +74,7 @@ export function copyFastLedFrame(module: FastLedModule): Uint8Array {
     const metadataLength = size()
     if (metadataLength > MAX_FRAME_BYTES) throw new Error('FastLED frame metadata exceeds the preview limit.')
     checkedRange(module.HEAPU8, metadataPointer, metadataLength)
-    const metadata: unknown = JSON.parse(new TextDecoder().decode(module.HEAPU8.subarray(metadataPointer, metadataPointer + metadataLength)).replace(/\0$/, ''))
+    const metadata: unknown = JSON.parse(new TextDecoder().decode(module.HEAPU8.slice(metadataPointer, metadataPointer + metadataLength)).replace(/\0$/, ''))
     if (!Array.isArray(metadata)) throw new Error('FastLED returned invalid strip metadata.')
     const ids: number[] = []
     for (const item of metadata) {

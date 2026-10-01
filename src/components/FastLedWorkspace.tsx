@@ -274,7 +274,7 @@ export function FastLedWorkspace({ onClose }: { onClose: () => void }) {
         <button type="button" onClick={download}>Download .ino{Object.keys(files).length > 0 ? ' only' : ''}</button>
         <button type="button" onClick={() => projectFileRef.current?.click()}>Import project</button>
         <button type="button" onClick={downloadProject}>Download project</button>
-        <input ref={fileRef} aria-label="Import source file" type="file" accept=".ino,.h,.hpp,.cpp,.c" hidden onChange={(event) => {
+        <input ref={fileRef} aria-label="Import source file" type="file" accept=".ino,.h,.hpp,.cpp" hidden onChange={(event) => {
           const file = event.target.files?.[0]
           if (file) void importFile(file)
           event.target.value = ''

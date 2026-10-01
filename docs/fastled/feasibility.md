@@ -48,6 +48,9 @@ cannot support a reproducible compatibility assertion.
    Flatten strips deterministically without resizing the authored LED count.
 5. Normalize bytes for the existing renderer. Geometry and monitor presentation
    are separate from the underlying byte comparison.
+6. Publish the latest RGB frame and geometry together through a fixed-size
+   shared-memory snapshot. The UI samples it at 60 Hz even when C++ blocks;
+   rapid shows cannot leave an earlier color stranded or grow a message queue.
 
 ## Limits requiring explicit evidence
 
@@ -64,8 +67,11 @@ cannot support a reproducible compatibility assertion.
   and [native capture](https://github.com/FastLED/FastLED/blob/3.10.4/src/platforms/stub/clockless_channel_stub.h).
 - Browser pixels include display geometry and rendering presentation. Screenshots
   supplement byte comparisons; they do not replace them.
-- Multi-file projects support a main sketch and flat `.h`, `.hpp`, `.c` and
+- Multi-file projects support a main sketch and flat `.h`, `.hpp` and lowercase
   `.cpp` support files, with lossless project download/import and dirty guards.
+  The upstream CLI combines `.cpp` files into one translation unit; independent
+  Arduino translation-unit semantics are not established. Unsupported `.c` and
+  uppercase `.CPP` inputs fail explicitly instead of being silently ignored.
   External libraries, audio/file inputs and FastLED UI controls require further
   integration and must not be reported as already supported.
 - The current CLI emits pthread-enabled WASM. Browser isolation and the classic
@@ -90,9 +96,9 @@ cannot support a reproducible compatibility assertion.
 
 - [x] Research reuse candidates and inspect original ABI.
 - [x] Isolated worktree and user-approved local workflow.
-- [ ] Compiler smoke using pinned FastLED.
-- [ ] IDE editor, worker and renderer integration.
-- [ ] Native/WASM demo parity and fixes.
+- [x] Compiler smoke using pinned FastLED.
+- [x] IDE editor, worker and renderer integration.
+- [x] Native/WASM demo parity and fixes.
 - [ ] Full acceptance, review and conditional main merge.
 
 ## Verified intermediate milestone (2026-10-02)
@@ -108,6 +114,16 @@ and desktop/narrow-screen layout with no page errors or footer overlap.
 Screenshots were inspected. Evidence records the dirty implementation state;
 this is intermediate evidence, not final committed-tip approval.
 
-All six reference examples compile natively, and Blink produces alternating red
-and black capture records. Full native/WASM byte parity is still pending. None
-of these results alone establishes full FastLED compatibility or authorizes merge.
+The completed native/WASM corpus now matches all six examples across 71,124
+show records and 12,090,672 RGB bytes, including timestamps and brightness.
+DemoReel100 covers 91.8012 virtual seconds and ColorPalette covers 83.001.
+See [`parity.md`](parity.md) for exact source/compiler hashes and test controls.
+
+Real Chromium execution of the product Blink artifact verifies alternating
+red/black, pause, reset and disposal. The rapid-show regression verifies that
+red then blue followed by a one-second blocking delay displays the final blue
+within 41 ms. The fixed-size RGB/geometry mailbox also passed a concurrent
+writer/reader review probe and the 65,536-pixel boundary. Browser proof found
+and fixed TextDecoder rejection of shared WASM memory. These results establish
+the named contracts; they do not imply universal Arduino/MCU compatibility or
+by themselves authorize the final merge.

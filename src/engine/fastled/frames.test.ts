@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { copyFastLedFrame, copyFastLedLayout, type FastLedModule } from './frames'
 
-function fixture(metadata: unknown = [{ strip_id: 3, type: 'r8g8b8' }, { strip_id: 1, type: 'r8g8b8' }]) {
+function fixture(metadata: unknown = [{ strip_id: 3, type: 'r8g8b8' }, { strip_id: 1, type: 'r8g8b8' }], shared = false) {
   const freed: number[] = []
-  const memory = new Uint8Array(1024)
+  const memory = new Uint8Array(shared ? new SharedArrayBuffer(1024) : new ArrayBuffer(1024))
   const json = new TextEncoder().encode(JSON.stringify(metadata))
   memory.set(json, 32)
   memory.set([10, 20, 30], 512)
@@ -19,8 +19,8 @@ function fixture(metadata: unknown = [{ strip_id: 3, type: 'r8g8b8' }, { strip_i
 }
 
 describe('FastLED frame ABI', () => {
-  it('preserves upstream geometry ordering and aspect ratio', () => {
-    const { module, memory, size, freed } = fixture()
+  it.each([false, true])('preserves upstream geometry ordering and aspect ratio (shared=%s)', (shared) => {
+    const { module, memory, size, freed } = fixture(undefined, shared)
     const layout = new TextEncoder().encode(JSON.stringify({
       '3': { strips: { '3': { map: { x: [20], y: [10] } } } },
       '1': { strips: { '1': { map: { x: [0], y: [0] } } } },
@@ -31,11 +31,12 @@ describe('FastLED frame ABI', () => {
     expect(freed).toEqual([32, 4])
     expect(copyFastLedLayout(module, 3)).toBeNull()
   })
-  it('orders strips by stable ID and copies borrowed memory before the next show', () => {
-    const { module, memory, freed } = fixture()
+  it.each([false, true])('orders strips and copies borrowed memory before the next show (shared=%s)', (shared) => {
+    const { module, memory, freed } = fixture(undefined, shared)
     const result = copyFastLedFrame(module)
     memory.fill(0)
     expect([...result]).toEqual([10, 20, 30, 255, 0, 128])
+    expect(result.buffer).toBeInstanceOf(ArrayBuffer)
     expect(freed).toEqual([32, 4]) // borrowed strip pointers must never be freed
   })
   it('cleans up metadata when strips are malformed or duplicated', () => {
