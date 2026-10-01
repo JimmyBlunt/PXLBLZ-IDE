@@ -1,4 +1,4 @@
-import { copyFastLedFrame, type FastLedModule } from './frames'
+import { copyFastLedFrame, copyFastLedLayout, type FastLedModule } from './frames'
 import type { FastLedArtifact } from './index'
 
 // A worker owns the entire C++ instance. A blocking delay or loop never runs on
@@ -13,6 +13,7 @@ let stepping = false
 let timer: ReturnType<typeof setTimeout> | undefined
 let callbackCount = 0
 let lastSentAt = -Infinity
+let lastLayout = ''
 
 function sendFrame() {
   if (!module) return
@@ -26,6 +27,12 @@ function sendFrame() {
   const frame = copyFastLedFrame(module)
   if (frame.length) {
     lastSentAt = now
+    const positions = copyFastLedLayout(module, frame.length / 3)
+    const layout = JSON.stringify(positions)
+    if (layout !== lastLayout) {
+      lastLayout = layout
+      scope.postMessage({ type: 'layout', positions: positions ?? [] })
+    }
     scope.postMessage({ type: 'frame', frame }, [frame.buffer])
   }
 }
@@ -58,8 +65,9 @@ async function load(artifact: FastLedArtifact) {
   if (typeof imported.default !== 'function') throw new Error('FastLED compiler artifact has no module factory.')
   module = await imported.default({
     noInitialRun: true,
-    locateFile: (file: string) => file.endsWith('.wasm') && artifact.wasmUrl
-      ? artifact.wasmUrl : new URL(file, artifact.moduleUrl).href,
+    // Preserve each upstream filename, including side modules if the compiler
+    // emits more than one WASM asset. Never redirect all modules to one binary.
+    locateFile: (file: string) => new URL(file, artifact.moduleUrl).href,
     pxlblzOnFrame: sendFrame,
     print: () => undefined,
     printErr: (message: string) => scope.postMessage({ type: 'log', message }),
@@ -72,6 +80,6 @@ async function load(artifact: FastLedArtifact) {
 
 scope.onmessage = (event: MessageEvent<{ type: string; artifact?: FastLedArtifact }>) => {
   if (event.data.type === 'load' && event.data.artifact) void load(event.data.artifact).catch(fail)
-  else if (event.data.type === 'start' && !running) { running = true; void tick() }
+  else if (event.data.type === 'start' && !running) { running = true; lastLayout = ''; void tick() }
   else if (event.data.type === 'pause') { running = false; clearTimeout(timer) }
 }

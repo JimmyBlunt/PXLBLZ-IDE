@@ -8,15 +8,15 @@ export interface FastLedArtifact {
   diagnostics?: string
 }
 
-export async function compileFastLed({ source, compilerUrl, signal }: {
-  source: string; compilerUrl: string; signal?: AbortSignal
+export async function compileFastLed({ source, files, compilerUrl, signal }: {
+  source: string; files?: Record<string, string>; compilerUrl: string; signal?: AbortSignal
 }): Promise<FastLedArtifact> {
   const base = new URL(compilerUrl)
   if (base.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(base.hostname)
     || base.username || base.password) throw new Error('Use the local FastLED compiler at http://127.0.0.1:9982.')
   const response = await fetch(new URL('/compile', base), {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ source, name: 'Sketch' }), signal,
+    body: JSON.stringify({ source, files, name: 'Sketch' }), signal,
   })
   const data: unknown = await response.json()
   if (!data || typeof data !== 'object') throw new Error('The compiler returned an invalid response.')
@@ -40,10 +40,11 @@ export interface FastLedRuntime {
   dispose(): void
 }
 
-export async function createFastLedRuntime({ artifact, onFrame, onError, signal }: {
+export async function createFastLedRuntime({ artifact, onFrame, onError, onLayout, signal }: {
   artifact: FastLedArtifact
   onFrame: (frame: Uint8Array) => void
   onError: (message: string) => void
+  onLayout?: (positions: [number, number][]) => void
   signal?: AbortSignal
 }): Promise<FastLedRuntime> {
   let worker: Worker | null = null
@@ -85,7 +86,7 @@ export async function createFastLedRuntime({ artifact, onFrame, onError, signal 
       if (!disposed && current === generation) onError(message)
     }
     next.onerror = (event) => fail(event.message || 'FastLED worker failed.')
-    next.onmessage = (event: MessageEvent<{ type: string; frame?: Uint8Array; message?: string }>) => {
+    next.onmessage = (event: MessageEvent<{ type: string; frame?: Uint8Array; positions?: [number, number][]; message?: string }>) => {
       if (disposed || current !== generation) return
       if (event.data.type === 'ready') {
         ready = true
@@ -93,7 +94,10 @@ export async function createFastLedRuntime({ artifact, onFrame, onError, signal 
         clearTimeout(timeout)
         resolve()
         if (playing) next.postMessage({ type: 'start' })
-      } else if (event.data.type === 'frame' && event.data.frame && playing && ready) onFrame(event.data.frame)
+      // setup() may itself animate LEDs before returning. Deliver those frames
+      // during initialization too; once ready, playback controls own delivery.
+      } else if (event.data.type === 'frame' && event.data.frame && (!ready || playing)) onFrame(event.data.frame)
+      else if (event.data.type === 'layout' && event.data.positions && (!ready || playing)) onLayout?.(event.data.positions)
       else if (event.data.type === 'error') fail(event.data.message || 'FastLED execution failed.')
     }
     next.postMessage({ type: 'load', artifact })

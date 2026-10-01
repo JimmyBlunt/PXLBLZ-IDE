@@ -9,8 +9,9 @@ describe('FastLED compiler client', () => {
   it('passes source verbatim and preserves compiler diagnostics', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ diagnostics: 'Sketch.ino:3: unknown symbol' }), { status: 422 }))
     vi.stubGlobal('fetch', fetch)
-    await expect(compileFastLed({ source: '#include <FastLED.h>\n', compilerUrl: 'http://127.0.0.1:9981' })).rejects.toThrow('Sketch.ino:3')
+    await expect(compileFastLed({ source: '#include <FastLED.h>\n', files: { 'effect.h': 'void effect();' }, compilerUrl: 'http://127.0.0.1:9981' })).rejects.toThrow('Sketch.ino:3')
     expect(JSON.parse(fetch.mock.calls[0][1].body).source).toBe('#include <FastLED.h>\n')
+    expect(JSON.parse(fetch.mock.calls[0][1].body).files).toEqual({ 'effect.h': 'void effect();' })
   })
   it('rejects remote compiler and cross-origin executable artifact URLs', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...artifact, moduleUrl: 'https://example.com/code.js' })))
@@ -36,6 +37,19 @@ class FakeWorker {
 }
 
 describe('FastLED worker ownership', () => {
+  it('shows setup animations before initialization returns', async () => {
+    vi.stubGlobal('Worker', FakeWorker)
+    FakeWorker.instances = []
+    const onFrame = vi.fn()
+    const pending = createFastLedRuntime({ artifact, onFrame, onError: vi.fn() })
+    const worker = FakeWorker.instances[0]
+    const frame = new Uint8Array([255, 0, 0])
+    worker.send({ type: 'frame', frame })
+    expect(onFrame).toHaveBeenCalledWith(frame)
+    worker.send({ type: 'ready' })
+    const runtime = await pending
+    runtime.dispose()
+  })
   it('drops paused frames and terminates the old worker on reset and disposal', async () => {
     vi.stubGlobal('Worker', FakeWorker)
     FakeWorker.instances = []

@@ -1,4 +1,5 @@
-.fastled-workspace { display: flex; flex-direction: column; height: 100%; min-height: 520px; color: #e4e4e7; background: #111113; font-size: 13px; }
+.fastled-workspace { display: flex; flex: 1; flex-direction: column; height: 100%; min-height: 0; overflow-y: auto; color: #e4e4e7; background: #111113; font-size: 13px; }
+.fastled-header, .fastled-toolbar, .fastled-workspace footer { flex-shrink: 0; }
 .fastled-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 20px; border-bottom: 1px solid #303036; }
 .fastled-header h1 { margin: 0; font-size: 20px; font-weight: 600; }
 .fastled-header p { margin: 4px 0 0; color: #a1a1aa; font-size: 12px; }
@@ -10,8 +11,11 @@
 .fastled-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; padding: 12px 20px; border-bottom: 1px solid #303036; }
 .fastled-workspace label { display: flex; flex-direction: column; gap: 4px; color: #a1a1aa; font-size: 11px; }
 .fastled-toolbar .fastled-endpoint { margin-left: auto; min-width: 240px; }
-.fastled-panes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(330px, 1fr); flex: 1; min-height: 0; }
+.fastled-panes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(330px, 1fr); flex: 1; min-height: 300px; }
 .fastled-code { display: flex; flex-direction: column; min-height: 300px; overflow: hidden; border-right: 1px solid #303036; }
+.fastled-file-bar { display: flex; align-items: end; gap: 8px; padding: 8px 12px; background: #1a1a1e; flex-shrink: 0; }
+.fastled-file-bar label { flex: 1; min-width: 0; }
+.fastled-file-bar select { width: 100%; }
 .fastled-pane-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 12px; min-height: 35px; background: #1a1a1e; color: #a1a1aa; font-size: 11px; }
 .fastled-pane-heading span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fastled-preview { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
@@ -27,4 +31,4 @@
 .fastled-diagnostics strong { font-size: 12px; }
 .fastled-diagnostics pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: monospace; font-size: 11px; margin: 6px 0 0; color: #a1a1aa; }
 .fastled-workspace footer { padding: 8px 20px; border-top: 1px solid #303036; color: #a1a1aa; font-size: 11px; }
-@media (max-width: 800px) { .fastled-workspace { height: auto; min-height: 100%; } .fastled-panes { grid-template-columns: 1fr; } .fastled-code { height: 420px; border-right: 0; } .fastled-preview { min-height: 420px; } .fastled-toolbar .fastled-endpoint { margin-left: 0; } }
+@media (max-width: 800px) { .fastled-panes { flex: none; grid-template-columns: 1fr; } .fastled-code { height: 420px; border-right: 0; } .fastled-preview { min-height: 420px; } .fastled-toolbar .fastled-endpoint { margin-left: 0; } }

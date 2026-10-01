@@ -10,7 +10,8 @@ Reuse original FastLED C++ compiled to WebAssembly, rather than reimplementing i
 color arithmetic, templates, noise, palettes, or timing macros in JavaScript.
 Feed copied RGB frames to the existing PXLBLZ WebGL renderer. Keep C++ source in
 an explicitly named FastLED workspace, separate from Pixelblaze Pattern records,
-Show compilation, and Send to Controller. Import/export `.ino` files explicitly;
+Show compilation, and Send to Controller. Import/export `.ino` files and complete
+`.fastled.json` projects explicitly;
 do not silently introduce a second browser-local personal-content database.
 
 The implementation branch is `feature/fastled-runtime`, isolated at
@@ -63,13 +64,16 @@ cannot support a reproducible compatibility assertion.
   and [native capture](https://github.com/FastLED/FastLED/blob/3.10.4/src/platforms/stub/clockless_channel_stub.h).
 - Browser pixels include display geometry and rendering presentation. Screenshots
   supplement byte comparisons; they do not replace them.
-- Single `.ino` editing is an initial integration milestone. Multi-file projects,
-  custom libraries, audio/file inputs and FastLED UI controls require additional
+- Multi-file projects support a main sketch and flat `.h`, `.hpp`, `.c` and
+  `.cpp` support files, with lossless project download/import and dirty guards.
+  External libraries, audio/file inputs and FastLED UI controls require further
   integration and must not be reported as already supported.
+- The current CLI emits pthread-enabled WASM. Browser isolation and the classic
+  pthread bootstrap asset are required; their real execution remains an open gate.
 
 ## Acceptance before merge
 
-- Official upstream Blink, DemoReel100, ColorPalette, Fire2012 and
+- Official upstream Blink, DemoReel100, ColorPalette, Fire2012, Noise and
   NoisePlusPalette sources are recorded with provenance and compiled.
 - Reference execution and IDE adapter compare LED counts, frame order, timestamps
   under a controlled clock, and RGB bytes; random sequences use identical seeds.
@@ -90,3 +94,20 @@ cannot support a reproducible compatibility assertion.
 - [ ] IDE editor, worker and renderer integration.
 - [ ] Native/WASM demo parity and fixes.
 - [ ] Full acceptance, review and conditional main merge.
+
+## Verified intermediate milestone (2026-10-02)
+
+The compiler-service suite passes 10 behavioral tests. Engine, routing, layout
+and project parsing pass 50 tests. The workspace passes 10 component tests using
+the documented local worker-startup allowance in
+[`evidence/ui-test-startup.md`](evidence/ui-test-startup.md); it does not alter
+assertions or test deadlines. A real Chromium run using
+`node scripts/fastled/browser-proof.mjs` verifies original multi-file export,
+support-file editing, refused discard, edited project import/export round trip,
+and desktop/narrow-screen layout with no page errors or footer overlap.
+Screenshots were inspected. Evidence records the dirty implementation state;
+this is intermediate evidence, not final committed-tip approval.
+
+All six reference examples compile natively, and Blink produces alternating red
+and black capture records. Full native/WASM byte parity is still pending. None
+of these results alone establishes full FastLED compatibility or authorizes merge.

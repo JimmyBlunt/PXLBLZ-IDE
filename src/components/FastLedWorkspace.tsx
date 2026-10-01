@@ -5,6 +5,7 @@ import { MAX_PIXEL_COUNT } from '@/engine/camera'
 import { compileFastLed, createFastLedRuntime, FASTLED_DEMOS } from '@/engine/fastled'
 import { NumberField } from '@/components/ui/number-field'
 import { setRouterNavigationPreflight } from '@/store/routerStore'
+import { parseFastLedProject, serializeFastLedProject, validateFastLedFilename, validateFastLedFiles } from '@/engine/fastled/project'
 import './FastLedWorkspace.css'
 
 type Runtime = Awaited<ReturnType<typeof createFastLedRuntime>>
@@ -13,6 +14,8 @@ type Status = 'idle' | 'compiling' | 'running' | 'paused' | 'error'
 /** A separate C++ workspace: its source never enters the Pixelblaze compiler. */
 export function FastLedWorkspace({ onClose }: { onClose: () => void }) {
   const [source, setSource] = useState(FASTLED_DEMOS[0]?.source ?? '')
+  const [files, setFiles] = useState<Record<string, string>>({ ...FASTLED_DEMOS[0]?.files })
+  const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [filename, setFilename] = useState(`${FASTLED_DEMOS[0]?.id ?? 'sketch'}.ino`)
   const [demoId, setDemoId] = useState<string>(FASTLED_DEMOS[0]?.id ?? '')
   const [compilerUrl, setCompilerUrl] = useState('http://127.0.0.1:9982')
@@ -21,11 +24,14 @@ export function FastLedWorkspace({ onClose }: { onClose: () => void }) {
   const [version, setVersion] = useState('')
   const [pixelCount, setPixelCount] = useState(0)
   const [columns, setColumns] = useState(30)
+  const [layoutMode, setLayoutMode] = useState<'sketch' | 'grid'>('sketch')
+  const [hasSketchLayout, setHasSketchLayout] = useState(false)
   const [applied, setApplied] = useState(false)
   const [unsaved, setUnsaved] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const projectFileRef = useRef<HTMLInputElement>(null)
   const rendererRef = useRef<Renderer | null>(null)
   const runtimeRef = useRef<Runtime | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -33,6 +39,9 @@ export function FastLedWorkspace({ onClose }: { onClose: () => void }) {
   const frameRef = useRef<Float32Array>(new Float32Array(0))
   const countRef = useRef(0)
   const columnsRef = useRef(columns)
+  const layoutModeRef = useRef(layoutMode)
+  const sketchLayoutRef = useRef<[number, number][] | null>(null)
+  const editorSource = selectedFile === null ? source : files[selectedFile] ?? ''
 
   function layoutFrame() {
     const viewport = viewportRef.current
@@ -41,7 +50,9 @@ export function FastLedWorkspace({ onClose }: { onClose: () => void }) {
     const count = countRef.current
     const width = Math.min(columnsRef.current, Math.max(1, count))
     const rows = Math.max(1, Math.ceil(count / width))
-    const positions: [number, number][] = Array.from({ length: count }, (_, index) => [
+    const sketchPositions = layoutModeRef.current === 'sketch' && sketchLayoutRef.current?.length === count
+      ? sketchLayoutRef.current : null
+    const positions: [number, number][] = sketchPositions ?? Array.from({ length: count }, (_, index) => [
       width === 1 ? 0.5 : (index % width) / (width - 1),
       rows === 1 ? 0.5 : Math.floor(index / width) / (rows - 1),
     ])
@@ -117,15 +128,24 @@ export function FastLedWorkspace({ onClose }: { onClose: () => void }) {
     abortRef.current = controller
     setStatus('compiling')
     setApplied(false)
+    sketchLayoutRef.current = null
+    setHasSketchLayout(false)
     setDiagnostics('Compiling the sketch with the local FastLED service…')
     try {
-      const artifact = await compileFastLed({ source, compilerUrl, signal: controller.signal })
+      validateFastLedFiles(source, files)
+      const artifact = await compileFastLed({ source, files, compilerUrl, signal: controller.signal })
       if (revision !== revisionRef.current) return
       setDiagnostics(artifact.diagnostics || 'Compilation succeeded.')
       setVersion(artifact.fastledVersion)
       const runtime = await createFastLedRuntime({
         artifact,
         signal: controller.signal,
+        onLayout(positions) {
+          if (revision !== revisionRef.current) return
+          sketchLayoutRef.current = positions
+          setHasSketchLayout(positions.length > 0)
+          layoutFrame()
+        },
         onFrame(frame) {
           if (revision !== revisionRef.current) return
           if (frame.length % 3 !== 0 || frame.length / 3 > MAX_PIXEL_COUNT) {
@@ -165,26 +185,63 @@ export function FastLedWorkspace({ onClose }: { onClose: () => void }) {
     }
   }
 
-  function download() {
-    const url = URL.createObjectURL(new Blob([source], { type: 'text/plain;charset=utf-8' }))
+  function downloadText(text: string, name: string) {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }))
     const anchor = document.createElement('a')
     anchor.href = url
-    anchor.download = filename.endsWith('.ino') ? filename : `${filename}.ino`
+    anchor.download = name
     anchor.click()
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-    setUnsaved(false)
   }
 
-  async function importFile(file: File) {
-    if (!canDiscard()) return
+  function download() {
+    downloadText(source, filename.endsWith('.ino') ? filename : `${filename}.ino`)
+    if (Object.keys(files).length === 0) setUnsaved(false)
+  }
+
+  function downloadProject() {
+    try {
+      const name = filename.replace(/\.ino$/i, '')
+      downloadText(serializeFastLedProject({ name, source, files }), `${name}.fastled.json`)
+      setUnsaved(false)
+    } catch (error) {
+      setDiagnostics(error instanceof Error ? error.message : String(error))
+      setStatus('error')
+    }
+  }
+
+  async function importFile(file: File, isProject = false) {
+    const mainFile = /\.ino$/i.test(file.name)
+    if ((isProject || mainFile) && !canDiscard()) return
+    if (!isProject && !mainFile && Object.prototype.hasOwnProperty.call(files, file.name)
+      && !window.confirm(`Replace ${file.name} with the imported file?`)) return
     invalidate()
     const revision = revisionRef.current
     try {
+      if (file.size > (isProject ? 8 : 1) * 1024 * 1024) throw new Error('The imported file is too large.')
       const text = await file.text()
       if (revision !== revisionRef.current) return
       setDemoId('')
-      replaceSource(text, file.name)
-      setUnsaved(false)
+      if (isProject) {
+        const project = parseFastLedProject(text)
+        replaceSource(project.source, /\.ino$/i.test(project.name) ? project.name : `${project.name}.ino`)
+        setFiles(project.files)
+        setSelectedFile(null)
+        setUnsaved(false)
+      } else if (mainFile) {
+        validateFastLedFiles(text, {})
+        replaceSource(text, file.name)
+        setFiles({})
+        setSelectedFile(null)
+        setUnsaved(false)
+      } else {
+        validateFastLedFilename(file.name)
+        const nextFiles = { ...files, [file.name]: text }
+        validateFastLedFiles(source, nextFiles)
+        setFiles(nextFiles)
+        setSelectedFile(file.name)
+        setUnsaved(true)
+      }
     } catch (error) {
       if (revision !== revisionRef.current) return
       setStatus('error')
@@ -205,17 +262,26 @@ export function FastLedWorkspace({ onClose }: { onClose: () => void }) {
             if (!demo || !canDiscard()) return
             setDemoId(demo.id)
             replaceSource(demo.source, `${demo.id}.ino`)
+            setFiles({ ...demo.files })
+            setSelectedFile(null)
             setUnsaved(false)
           }}>
             <option value="" disabled>Custom sketch</option>
             {FASTLED_DEMOS.map((demo) => <option key={demo.id} value={demo.id}>{demo.name}</option>)}
           </select>
         </label>
-        <button type="button" onClick={() => fileRef.current?.click()}>Import .ino</button>
-        <button type="button" onClick={download}>Download .ino</button>
-        <input ref={fileRef} type="file" accept=".ino" hidden onChange={(event) => {
+        <button type="button" onClick={() => fileRef.current?.click()}>Import source file</button>
+        <button type="button" onClick={download}>Download .ino{Object.keys(files).length > 0 ? ' only' : ''}</button>
+        <button type="button" onClick={() => projectFileRef.current?.click()}>Import project</button>
+        <button type="button" onClick={downloadProject}>Download project</button>
+        <input ref={fileRef} aria-label="Import source file" type="file" accept=".ino,.h,.hpp,.cpp,.c" hidden onChange={(event) => {
           const file = event.target.files?.[0]
           if (file) void importFile(file)
+          event.target.value = ''
+        }} />
+        <input ref={projectFileRef} aria-label="Import project file" type="file" accept=".json" hidden onChange={(event) => {
+          const file = event.target.files?.[0]
+          if (file) void importFile(file, true)
           event.target.value = ''
         }} />
         <label className="fastled-endpoint">Compiler service
@@ -227,9 +293,31 @@ export function FastLedWorkspace({ onClose }: { onClose: () => void }) {
       </div>
       <div className="fastled-panes">
         <div className="fastled-code">
-          <div className="fastled-pane-heading"><span>{filename}{unsaved ? ' · Not downloaded' : ''}</span><span>C++ / Arduino</span></div>
-          <MonacoEditor height="100%" language="cpp" theme="vs-dark" value={source}
-            onChange={(value) => { if (value !== undefined && value !== source) { setDemoId(''); replaceSource(value); setUnsaved(true) } }}
+          <div className="fastled-file-bar">
+            <label>Project file<select aria-label="Project file" value={selectedFile ?? ''} onChange={(event) => setSelectedFile(event.target.value || null)}>
+              <option value="">{filename}</option>
+              {Object.keys(files).map((name) => <option key={name} value={name}>{name}</option>)}
+            </select></label>
+            <button type="button" disabled={selectedFile === null} onClick={() => {
+              if (selectedFile === null) return
+              const nextFiles = { ...files }
+              delete nextFiles[selectedFile]
+              invalidate()
+              setFiles(nextFiles)
+              setSelectedFile(null)
+              setDemoId('')
+              setUnsaved(true)
+            }}>Remove file</button>
+          </div>
+          <div className="fastled-pane-heading"><span>{selectedFile ?? filename}{unsaved ? ' · Not downloaded' : ''}</span><span>C++ / Arduino</span></div>
+          <MonacoEditor height="100%" language="cpp" theme="vs-dark" value={editorSource}
+            onChange={(value) => {
+              if (value === undefined || value === editorSource) return
+              setDemoId('')
+              if (selectedFile === null) replaceSource(value)
+              else { invalidate(); setFiles({ ...files, [selectedFile]: value }) }
+              setUnsaved(true)
+            }}
             options={{ automaticLayout: true, minimap: { enabled: false }, fontSize: 13, tabSize: 2, scrollBeyondLastLine: false }} />
         </div>
         <div className="fastled-preview">
@@ -247,22 +335,32 @@ export function FastLedWorkspace({ onClose }: { onClose: () => void }) {
               runtimeRef.current?.start()
               setStatus('running')
             }}>Reset</button>
+            <label>Layout<select aria-label="Preview layout" value={layoutMode} onChange={(event) => {
+              const mode = event.target.value === 'grid' ? 'grid' : 'sketch'
+              layoutModeRef.current = mode
+              setLayoutMode(mode)
+              layoutFrame()
+            }}><option value="sketch">Sketch layout</option><option value="grid">Index grid</option></select></label>
             <NumberField label="Columns" ariaLabel="Preview columns" min={1} max={512} value={columns} onChange={(nextValue) => {
               const value = Math.floor(nextValue)
+              layoutModeRef.current = 'grid'
+              setLayoutMode('grid')
               columnsRef.current = value
               setColumns(value)
               layoutFrame()
             }} />
           </div>
           <div ref={viewportRef} className="fastled-canvas-container"><canvas ref={canvasRef} aria-label="FastLED RGB frame" /></div>
-          <div className="fastled-frame-note">{applied ? 'Sketch output · LEDs arranged by index' : 'Compile the current source to update this preview'}</div>
+          <div className="fastled-frame-note">{applied
+            ? layoutMode === 'sketch' && hasSketchLayout ? 'Sketch output · Original LED layout' : 'Sketch output · LEDs arranged by index'
+            : 'Compile the current source to update this preview'}</div>
           <div className="fastled-diagnostics" role="status" aria-live="polite">
             <strong>{status === 'idle' ? 'Ready to compile' : status === 'error' ? 'Error' : status === 'paused' ? 'Paused' : status === 'running' ? 'Running' : 'Compiling'}</strong>
             <pre>{diagnostics || 'Choose an example or import a sketch. Download your source to keep this session.'}</pre>
           </div>
         </div>
       </div>
-      <footer>Source is held in this session. Use Download .ino to save your work. FastLED sketches run on this computer.</footer>
+      <footer>Source is held in this session. Download project saves the sketch and all support files; Download .ino saves the main file only. Importing a new .ino starts a new project. FastLED sketches run on this computer.</footer>
     </section>
   )
 }

@@ -1,0 +1,23 @@
+{
+  "commit": "6832588283bdce6bc3dde795ce4172b791882e15",
+  "dirty": "M docs/fastled/compiler.md\n M scripts/fastled/server.mjs\n M scripts/fastled/server.test.mjs\n M src/components/FastLedWorkspace.css\n M src/components/FastLedWorkspace.test.tsx\n M src/components/FastLedWorkspace.tsx\n M src/engine/fastled/examples.ts\n M src/engine/fastled/frames.test.ts\n M src/engine/fastled/frames.ts\n M src/engine/fastled/index.test.ts\n M src/engine/fastled/index.ts\n M src/engine/fastled/runtime.worker.ts",
+  "capturedAt": "2026-10-01T22:43:24.698Z",
+  "url": "http://127.0.0.1:5184/PXLBLZ-IDE/fastled",
+  "errors": [],
+  "geometry": {
+    "horizontalOverflow": false,
+    "footerOverlapsPreview": false
+  },
+  "passed": [
+    "original multi-file demo export",
+    "support-file editing",
+    "discard refusal",
+    "edited project import/export round trip",
+    "desktop and narrow layout"
+  ],
+  "excluded": [
+    "C++ compilation",
+    "native/WASM parity",
+    "physical LED output"
+  ]
+}

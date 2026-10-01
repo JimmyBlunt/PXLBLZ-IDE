@@ -21,7 +21,10 @@ vi.mock('@/engine/renderer', () => ({
 vi.mock('@/engine/fastled', () => ({
   compileFastLed: mocks.compile,
   createFastLedRuntime: mocks.createRuntime,
-  FASTLED_DEMOS: [{ id: 'Blink', name: 'Blink', source: '#include <FastLED.h>\nvoid loop() {}' }],
+  FASTLED_DEMOS: [
+    { id: 'Blink', name: 'Blink', source: '#include <FastLED.h>\nvoid loop() {}' },
+    { id: 'Noise', name: 'Noise', source: '#include "Noise.h"', files: { 'Noise.h': 'void setup() {} void loop() {}' } },
+  ],
 }))
 
 function makeRuntime() {
@@ -82,6 +85,24 @@ describe('FastLED workspace', () => {
     expect(screen.getByText('Ready to compile')).toBeInTheDocument()
   })
 
+  it('uses the upstream layout by default and switches to an index grid without changing RGB output', async () => {
+    const runtime = makeRuntime()
+    mocks.createRuntime.mockResolvedValue(runtime)
+    render(<FastLedWorkspace onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Compile & run' }))
+    await waitFor(() => expect(runtime.start).toHaveBeenCalledOnce())
+    const { onLayout, onFrame } = mocks.createRuntime.mock.calls[0][0]
+    act(() => {
+      onLayout([[0.1, 0.2], [0.3, 0.4]])
+      onFrame(new Uint8Array([255, 0, 0, 0, 255, 0]))
+    })
+    expect(mocks.positions.mock.calls[mocks.positions.mock.calls.length - 1][0]).toEqual([[0.1, 0.2], [0.3, 0.4]])
+    fireEvent.change(screen.getByRole('combobox', { name: 'Preview layout' }), { target: { value: 'grid' } })
+    expect(mocks.positions.mock.calls[mocks.positions.mock.calls.length - 1][0]).toEqual([[0, 0.5], [1, 0.5]])
+    expect(Array.from(mocks.paint.mock.calls[mocks.paint.mock.calls.length - 1][0] as Float32Array)).toEqual([1, 0, 0, 0, 1, 0])
+    expect(runtime.start).toHaveBeenCalledOnce()
+  })
+
   it('disposes a runtime that finishes loading after the workspace closes', async () => {
     const runtime = makeRuntime()
     let finish!: (value: ReturnType<typeof makeRuntime>) => void
@@ -137,5 +158,35 @@ describe('FastLED workspace', () => {
     unmount()
     useRouterStore.getState().navigate({ kind: 'gallery' })
     expect(previousGuard).toHaveBeenCalledOnce()
+  })
+
+  it('edits a demo support file and submits it with the unchanged main source', async () => {
+    render(<FastLedWorkspace onClose={vi.fn()} />)
+    fireEvent.change(screen.getByRole('combobox', { name: 'Official example' }), { target: { value: 'Noise' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Project file' }), { target: { value: 'Noise.h' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'C++ source' }), { target: { value: 'void setup() {} void loop() { FastLED.show(); }' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Compile & run' }))
+    await waitFor(() => expect(mocks.compile).toHaveBeenCalledOnce())
+    expect(mocks.compile.mock.calls[0][0]).toMatchObject({
+      source: '#include "Noise.h"', files: { 'Noise.h': 'void setup() {} void loop() { FastLED.show(); }' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Remove file' }))
+    expect(screen.queryByRole('option', { name: 'Noise.h' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'C++ source' })).toHaveValue('#include "Noise.h"')
+  })
+
+  it('imports a project with support files and a new ino clears those files', async () => {
+    render(<FastLedWorkspace onClose={vi.fn()} />)
+    const projectFile = new File([''], 'example.fastled.json')
+    Object.defineProperty(projectFile, 'text', { value: async () => JSON.stringify({
+      format: 'pxlblz-fastled', version: 1, name: 'Imported', source: '#include "helper.h"', files: { 'helper.h': '// header' },
+    }) })
+    fireEvent.change(screen.getByLabelText('Import project file'), { target: { files: [projectFile] } })
+    await screen.findByRole('option', { name: 'helper.h' })
+    const mainFile = new File([''], 'Replacement.ino')
+    Object.defineProperty(mainFile, 'text', { value: async () => '// replacement sketch' })
+    fireEvent.change(screen.getByLabelText('Import source file', { selector: 'input' }), { target: { files: [mainFile] } })
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'C++ source' })).toHaveValue('// replacement sketch'))
+    expect(screen.queryByRole('option', { name: 'helper.h' })).not.toBeInTheDocument()
   })
 })
