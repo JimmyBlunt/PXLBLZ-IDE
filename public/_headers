@@ -1,0 +1,20 @@
+# FastLED requires a separate cross-origin-isolated document for WASM pthreads.
+# Other documents retain their existing OAuth, extension and embedding behavior.
+/fastled
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless
+/fastled/
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless
+/assets/runtime.worker-*.js
+  Cross-Origin-Embedder-Policy: credentialless
+
+# The default Vite base used by local/static previews.
+/PXLBLZ-IDE/fastled
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless
+/PXLBLZ-IDE/fastled/
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: credentialless
+/PXLBLZ-IDE/assets/runtime.worker-*.js
+  Cross-Origin-Embedder-Policy: credentialless

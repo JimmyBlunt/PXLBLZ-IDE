@@ -10,6 +10,7 @@ import path from 'path'
 import fs from 'fs'
 import { execFileSync } from 'child_process'
 import { assertVitestProjectIdentity } from './scripts/vitest-project-identity.js'
+import { fastLedIsolationHeaders } from './src/engine/fastled/isolation'
 
 const DEFAULT_BASE = '/PXLBLZ-IDE/'
 const DEFAULT_API_PROXY_TARGET = 'http://localhost:8788'
@@ -19,6 +20,8 @@ const TEST_DISCOVERY_EXCLUDES = [
   ...defaultExclude,
   'e2e/**',
   '**/worktrees/**',
+  // Generated upstream C++/compiler checkout used by native/WASM parity.
+  'test/fastled/.cache/**',
 ]
 const LAYOUT_TEST_FILES = ['**/*.layout.test.ts', '**/*.layout.test.tsx']
 
@@ -184,6 +187,20 @@ function redirectBaseTrailingSlash(base: string) {
   }
 }
 
+// Mirror the production asset headers on both development and built previews.
+// Policy is intentionally document-scoped: Pixelblaze's existing OAuth and
+// extension flows continue in their ordinary, non-isolated document.
+function fastLedIsolation(base: string): import('vite').Plugin {
+  const install = (server: import('vite').ViteDevServer | import('vite').PreviewServer) => {
+    server.middlewares.use((request, response, next) => {
+      const pathname = new URL(request.url ?? '/', 'http://localhost').pathname
+      for (const [name, value] of Object.entries(fastLedIsolationHeaders(pathname, base))) response.setHeader(name, value)
+      next()
+    })
+  }
+  return { name: 'fastled-document-isolation', configureServer: install, configurePreviewServer: install }
+}
+
 export default defineConfig(async ({ command, mode, isPreview }): Promise<ViteUserConfig> => {
   // loadEnv reads .env files only. Keep shell-provided values authoritative so
   // isolated Playwright smoke servers can select their own Vite port and API
@@ -223,6 +240,7 @@ export default defineConfig(async ({ command, mode, isPreview }): Promise<ViteUs
       __PXLBLZ_APP_VERSION__: JSON.stringify(appVersion),
     },
     plugins: [
+      fastLedIsolation(base),
       redirectBaseTrailingSlash(base),
       captureSink(),
       identityEndpoint(),
@@ -237,6 +255,9 @@ export default defineConfig(async ({ command, mode, isPreview }): Promise<ViteUs
       port,
       strictPort: true,
       allowedHosts: true,
+      // Native compiler copies contain their own tsconfig files. They are
+      // generated artifacts, not app source, and must not invalidate Vite.
+      watch: { ignored: ['**/test/fastled/.cache/**'] },
       // A worktree may link the checked-out dependency tree during local QA.
       // Permit Vite's font imports through that resolved path so the browser
       // smoke's console oracle still catches application errors rather than

@@ -1119,7 +1119,11 @@ function StudioApp() {
             </Button>
           )}
           <AuthStatus />
-          <Button size="sm" variant="outline" onClick={() => navigate({ kind: 'fastled' })} title="Open FastLED computer preview">FastLED</Button>
+          <Button size="sm" variant="outline" onClick={() => requestBufferReplacement(() => {
+            // Isolation headers require a new document; first settle the current
+            // Pixelblaze draft through the same preflight as ordinary navigation.
+            window.location.assign(routePath({ kind: 'fastled' }, import.meta.env.BASE_URL) + window.location.search)
+          })} title="Open FastLED computer preview">FastLED</Button>
         </span>
       </header>}
       {authNotice && (
@@ -1144,7 +1148,11 @@ function StudioApp() {
       )}
       {route.kind === 'fastled' ? (
         <Suspense fallback={<div role="status" className="p-4">Loading FastLED workspace…</div>}>
-          <FastLedWorkspace onClose={() => navigate({ kind: 'gallery' })} />
+          <FastLedWorkspace onClose={() => {
+            // Leave the isolated document. The workspace's beforeunload guard
+            // protects source edits; do not also trigger a second SPA prompt.
+            window.location.assign(routePath({ kind: 'gallery' }, import.meta.env.BASE_URL) + window.location.search)
+          }} />
         </Suspense>
       ) : route.kind === 'gallery' ? (
         invalidGalleryDirectoryRoute ? (
