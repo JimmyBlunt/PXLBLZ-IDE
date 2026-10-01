@@ -1,0 +1,114 @@
+{
+  "complete": true,
+  "crossTargetParity": false,
+  "kind": "native-reference",
+  "fastled": "3.10.4",
+  "compiler": "clang version 21.1.5",
+  "target": "x86_64-w64-windows-gnu",
+  "sourceDigest": "aedcf36f044805154743a96b858065012dbef8afe9a6b9991904bed315cf9809",
+  "seed": 1337,
+  "stepMicroseconds": 16667,
+  "examples": [
+    {
+      "name": "Blink",
+      "loops": 12,
+      "frames": 24,
+      "rgbBytes": 72,
+      "firstVirtualTimeUs": 16667,
+      "lastVirtualTimeUs": 7300004,
+      "frameSha256": "7285ca6337c8932569741669d89847c1579c9e66c412d5c27cf10005d1d94780",
+      "sourceTreeSha256": "936e2f1351d8770869192da14b63b24a3adc90b4bd3cb526987a1012a85f2a01",
+      "sourceFiles": [
+        {
+          "path": "Blink.ino",
+          "sha256": "02433dd25612ad7d69a6962c2dd3409581cb91c9ae81e7c67d265cd76e05d6fc"
+        }
+      ]
+    },
+    {
+      "name": "ColorPalette",
+      "loops": 3000,
+      "frames": 33000,
+      "rgbBytes": 4950000,
+      "firstVirtualTimeUs": 3016667,
+      "lastVirtualTimeUs": 83001000,
+      "frameSha256": "92400a06b43e3d647d9442f262cacc577b9b54d39cdc23e6a5b7edaec4c9d910",
+      "sourceTreeSha256": "b24f66874ee0e28e0fc8f98534d3e6e836b80bec735d2a90a986a4db295f8e01",
+      "sourceFiles": [
+        {
+          "path": "ColorPalette.ino",
+          "sha256": "27ee180a70e329aff74047a1670aca5e18372c79ce50c0bc2a10f3bdbad9b943"
+        }
+      ]
+    },
+    {
+      "name": "Fire2012",
+      "loops": 300,
+      "frames": 5100,
+      "rgbBytes": 459000,
+      "firstVirtualTimeUs": 3016667,
+      "lastVirtualTimeUs": 12800100,
+      "frameSha256": "79ec835ac208d4d8fb76971618a8fb9bcc3843752d1dab90779ebeb908af1802",
+      "sourceTreeSha256": "807edd9953f9f50140178ee78d2bc9939234e4ffcccef84d698fd12d38655f5a",
+      "sourceFiles": [
+        {
+          "path": "Fire2012.ino",
+          "sha256": "14eb8ece1707c8bd472d64df6b49d0b24e52cc42a20229f9172000535f858cec"
+        }
+      ]
+    },
+    {
+      "name": "DemoReel100",
+      "loops": 3600,
+      "frames": 32400,
+      "rgbBytes": 6220800,
+      "firstVirtualTimeUs": 3016667,
+      "lastVirtualTimeUs": 91801200,
+      "frameSha256": "93bc068519110b821a7823afb34c0795589a3176719b766f9dafd829daa9a545",
+      "sourceTreeSha256": "f35044c0068dbe73233dd428833762f36063c4f7ef5b3afea7d7b562d2c07feb",
+      "sourceFiles": [
+        {
+          "path": "DemoReel100.ino",
+          "sha256": "6296e7ba07d53fcd0fcd6c644843494b1b127870103bd0ff1a6e2798e0cdb6f1"
+        }
+      ]
+    },
+    {
+      "name": "Noise",
+      "loops": 300,
+      "frames": 300,
+      "rgbBytes": 230400,
+      "firstVirtualTimeUs": 3016667,
+      "lastVirtualTimeUs": 8000100,
+      "frameSha256": "6e754f4a995fa942a2b27d6c8932b2e46a0c4224fd8277f496fdb69aecce583c",
+      "sourceTreeSha256": "851e81e674d802f864c60460ae2796e64ca7ef118801d50ee0af7c7f0bc69124",
+      "sourceFiles": [
+        {
+          "path": "Noise.ino",
+          "sha256": "4605a15ef0f330e9c5418e4297d79eadc507c004bedb6ce80c0aa148ebca04ca"
+        }
+      ]
+    },
+    {
+      "name": "NoisePlusPalette",
+      "loops": 300,
+      "frames": 300,
+      "rgbBytes": 230400,
+      "firstVirtualTimeUs": 3016667,
+      "lastVirtualTimeUs": 8000100,
+      "frameSha256": "93bf13e222e05c9fde204e2cf937f6357ff65e8bc7cf5737f9dbd5de36b127a3",
+      "sourceTreeSha256": "0a8620713f74c15e9d6953e9917f91d64bbab77b5b3c3dd2b18eb9e1aa4439f1",
+      "sourceFiles": [
+        {
+          "path": "NoisePlusPalette.h",
+          "sha256": "3330013e84328181c0e50e765b20917034de9af45bb62aeb0d9e3bd3ee8d24f9"
+        },
+        {
+          "path": "NoisePlusPalette.ino",
+          "sha256": "520a12b417c8b74d17d675ac3a585d29f10fc3fbf582c87048aa93919b0c7185"
+        }
+      ]
+    }
+  ],
+  "completedAt": "2026-10-01T22:49:16.653Z"
+}

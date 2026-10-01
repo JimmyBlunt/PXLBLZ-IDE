@@ -106,6 +106,27 @@ The counts exceed loop counts where the sketch or `FastLED.delay()` calls
 `show()` multiple times. Blink's first records are red at 16,667 microseconds
 and black at 516,667 microseconds. Four comparator/cache self-tests also pass.
 
+A subsequent full native run completed with seed 1337 and 16,667 microseconds
+advanced before each loop. `node test/fastled/run-native.mjs` reproduces it.
+The committed `test/fastled/evidence/native-reference.json` records source and
+frame-stream SHA-256 hashes, compiler identity and the following coverage:
+
+| Example | Loops | Show records | RGB bytes | Last virtual time (seconds) |
+| --- | ---: | ---: | ---: | ---: |
+| Blink | 12 | 24 | 72 | 7.300004 |
+| ColorPalette | 3,000 | 33,000 | 4,950,000 | 83.001000 |
+| Fire2012 | 300 | 5,100 | 459,000 | 12.800100 |
+| DemoReel100 | 3,600 | 32,400 | 6,220,800 | 91.801200 |
+| Noise | 300 | 300 | 230,400 | 8.000100 |
+| NoisePlusPalette | 300 | 300 | 230,400 | 8.000100 |
+
+Raw logs remain local under `.cache/evidence`; the committed hashes describe
+the parsed ordered frame arrays encoded with `JSON.stringify` and UTF-8.
 These are native execution and harness checks. The WASM recordings and the
-full-duration cross-target comparison remain pending; there is no claim of a
-passed native-versus-WASM corpus until those recordings are compared.
+cross-target comparison remain pending; there is no claim of a passed
+native-versus-WASM corpus until those recordings are compared.
+
+For trimmed source copies, set `UV_PYTHON` and `FASTLED_PYTHON_EXECUTABLE` to
+the same Python 3.11+ interpreter used by the compiler toolchain. Upstream
+Meson helpers invoke `uv run python`; without that explicit selection they
+may choose an older ambient interpreter lacking `tomllib`.

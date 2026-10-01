@@ -1,0 +1,33 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { parseFrames } from './compare.mjs';
+const cache = path.resolve(process.argv[2] ?? path.join(path.dirname(fileURLToPath(import.meta.url)), '.cache'));
+const provenance = JSON.parse(fs.readFileSync(path.join(cache, 'provenance.json')));
+const build = JSON.parse(fs.readFileSync(path.join(cache, 'native/build-manifest.json')));
+const steps = { Blink: 12, ColorPalette: 3000, Fire2012: 300, DemoReel100: 3600, Noise: 300, NoisePlusPalette: 300 };
+const report = { complete: false, crossTargetParity: false, kind: 'native-reference', fastled: provenance.fastled, compiler: build.compilerVersion.split('\n')[0], target: 'x86_64-w64-windows-gnu', sourceDigest: build.sourceDigest, seed: 1337, stepMicroseconds: 16667, examples: [] };
+fs.mkdirSync(path.join(cache, 'evidence'), { recursive: true });
+fs.writeFileSync(path.join(cache, 'evidence/native-report.json'), `${JSON.stringify(report, null, 2)}\n`);
+for (const example of provenance.examples) {
+  const { name } = example;
+  if (!steps[name]) throw new Error(`No run specification for ${name}`);
+  const result = spawnSync(path.join(cache, 'native', `${name}${process.platform === 'win32' ? '.exe' : ''}`), [String(steps[name]), '16667'], { encoding: 'utf8', timeout: 120000, maxBuffer: 256 * 1024 * 1024, windowsHide: true });
+  if (result.error || result.status !== 0) throw new Error(`${name}: ${result.error || result.stderr}`);
+  fs.writeFileSync(path.join(cache, 'evidence', `${name}.native.log`), result.stdout);
+  fs.writeFileSync(path.join(cache, 'evidence', `${name}.native.stderr`), result.stderr);
+  const markers = result.stdout.split(/\r?\n/).filter(line => line.startsWith('PXLPROVENANCE '));
+  if (markers.length !== 1) throw new Error(`${name} must have one source provenance record`);
+  const actual = JSON.parse(markers[0].slice(14));
+  if (actual.example !== name || actual.sourceSha256 !== example.sourceTreeSha256 || actual.seed !== 1337) throw new Error(`${name} has stale provenance`);
+  const frames = parseFrames(result.stdout);
+  if (!frames.length) throw new Error(`${name} has no frames`);
+  const entry = { name, loops: steps[name], frames: frames.length, rgbBytes: frames.reduce((total, frame) => total + frame.rgb.length, 0), firstVirtualTimeUs: frames[0].timeUs, lastVirtualTimeUs: frames.at(-1).timeUs, frameSha256: createHash('sha256').update(JSON.stringify(frames)).digest('hex'), sourceTreeSha256: example.sourceTreeSha256, sourceFiles: example.sourceFiles };
+  report.examples.push(entry);
+  console.log(JSON.stringify(entry));
+}
+report.complete = true;
+report.completedAt = new Date().toISOString();
+fs.writeFileSync(path.join(cache, 'evidence/native-report.json'), `${JSON.stringify(report, null, 2)}\n`);
