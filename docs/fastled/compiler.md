@@ -38,7 +38,7 @@ multi-tenant security sandbox.
 - `POST /compile`, with `Content-Type: application/json` and
   `{ "source": "...", "files": { "helper.h": "..." }, "name": "optional display name" }`, accepts one sketch.
   The name does not affect filesystem paths. Success returns `id`, `moduleUrl`,
-  optional `wasmUrl`, `diagnostics`, and `fastledVersion`.
+  `runtimeUrl`, `wasmUrl`, `diagnostics`, and `fastledVersion`.
 - `GET /builds/<sha256>/<asset>` serves only compiler JavaScript/WASM/data
   assets. Source, manifests, and arbitrary local paths are not served.
 
@@ -58,14 +58,22 @@ Failures return JSON with `error` and `diagnostics`: 400 invalid source/JSON,
 413 size limit, 415 wrong content type, 422 compiler diagnostics, 429 full queue,
 503 missing compiler/library, and 504 timeout. On Windows, timeout terminates
 the compiler process tree. Compilation never requests interactive input.
+The upstream Arduino parser has a separate two-second cooperative deadline.
+When that exact deadline expires under build load, the service retries once
+with unchanged source and compiler arguments, within the original overall
+timeout. Syntax errors and other compiler failures are not retried.
 
 ## Runtime adapter
 
 The generated ES module exports the upstream `fastled` factory as its default.
-Pass `locateFile` resolving adjacent build assets and `noInitialRun: true`, then
+Pass `locateFile` resolving adjacent build assets, `mainScriptUrlOrBlob` set to
+a same-origin Blob bootstrap that imports the untouched classic `runtimeUrl`,
+and `noInitialRun: true`, then
 call `_extern_setup` once and `_extern_loop` for subsequent iterations. The
 original generated JavaScript is retained; the service writes a separate ES
-module copy adding the factory export when needed.
+module copy adding the factory export when needed. Upstream's pthread backend
+requires a cross-origin-isolated page (COOP/COEP) and starts a four-worker pool;
+the classic runtime URL lets those workers load the original compiler output.
 
 `frame-adapter.h` registers a low-priority `fl::EngineEvents::Listener`. Its
 `onEndFrame` callback invokes `Module.pxlblzOnFrame`, after upstream frame
@@ -74,13 +82,28 @@ official WASM ABI. Observing every show preserves sketches such as Blink that
 show multiple different states within one `loop()` invocation. No FastLED
 integer arithmetic, color conversion, or user source expressions are rewritten.
 
-The source API accepts one `.ino` body and up to 32 named `.h`, `.hpp`, `.cpp`,
-or `.c` supporting files plus standard FastLED headers. Filenames must be flat,
+The source API accepts one `.ino` body and up to 32 named `.h`, `.hpp`, or lowercase
+`.cpp` supporting files plus standard FastLED headers. Header extensions are
+case-insensitive. Filenames must be flat,
 start with an ASCII letter or digit, and cannot contain `..`, alias another
 filename by case, use Windows device names, or replace the generated adapter.
 External Arduino libraries, hardware
 peripherals and on-device timing are separate capabilities, not a claim of
 universal Arduino firmware compatibility.
+
+Compatibility is scoped to the official FastLED PC/WASM target. The pinned
+CLI combines the sketch and supporting lowercase `.cpp` files into one C++
+translation unit by including those files in sorted order. For example, two
+files that each declare `static int state` can conflict here even though an
+Arduino build with separate translation units accepts them. Standalone `.c`
+and uppercase `.CPP` files are rejected with explicit diagnostics because the
+upstream wrapper would silently ignore them. The bridge preserves the
+upstream compilation behavior and
+does not promise arbitrary Arduino multi-file build equivalence. See
+[`create_wrapper` and `collect_cpp_files` in the pinned CLI source](https://github.com/zackees/fastled-wasm/blob/bb1d619c1d64194198f9c68ac852fc79e6a01d9e/crates/fastled-cli/src/wasm_build.rs#L1498).
+No supported separate-translation-unit sketch option was identified in this
+CLI revision. Matching MCU ABI, physical peripherals, and real-time hardware
+timing is outside the computer-rendering acceptance target.
 
 ## Focused verification
 

@@ -14,6 +14,9 @@ export const FASTLED_VERSION = '3.10.4';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ORIGINS = ['http://localhost:5174', 'http://127.0.0.1:5174', 'http://localhost:5184', 'http://127.0.0.1:5184'];
 const SOURCE_LIMIT = 1024 * 1024;
+// JSON may encode one decoded byte as six wire bytes (e.g. "\\u0001").
+// Keep a separate transport bound; validateSketchFiles owns the decoded cap.
+const WIRE_LIMIT = 6 * SOURCE_LIMIT + 65536;
 const LOG_LIMIT = 128 * 1024;
 const BRIDGE_ABI = 'pxlblz-fastled-2';
 
@@ -26,7 +29,10 @@ export function validateSketchFiles(source, files = {}) {
   const sorted = [];
   for (const [name, contents] of Object.entries(files).sort(([a], [b]) => a.localeCompare(b))) {
     const lower = name.toLowerCase();
-    if (name.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9_.-]*\.(?:h|hpp|cpp|c)$/i.test(name) || name.includes('..') || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])\./i.test(name) || lower === 'pxlblz-frame-adapter.h' || names.has(lower)) {
+    if (/\.c$/i.test(name) || (/\.cpp$/i.test(name) && !name.endsWith('.cpp'))) {
+      throw new CompileError(`Unsupported source extension: ${name}. The FastLED WASM compiler requires lowercase .cpp; standalone .c files are not compiled.`, 400);
+    }
+    if (name.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9_.-]*\.(?:h|hpp|cpp)$/i.test(name) || name.includes('..') || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])\./i.test(name) || lower === 'pxlblz-frame-adapter.h' || names.has(lower)) {
       throw new CompileError(`Unsupported or duplicate sketch filename: ${name}`, 400);
     }
     if (typeof contents !== 'string') throw new CompileError(`File ${name} must contain text.`, 400);
@@ -123,7 +129,10 @@ export function createCompiler(options = {}) {
     const cached = await readFile(manifestPath, 'utf8').then(JSON.parse).catch(() => null);
     if (cached?.result && Array.isArray(cached.assets) && cached.assets.includes('module.mjs')) {
       const intact = await Promise.all(cached.assets.map((name) => stat(join(directory, basename(name))).then((file) => file.isFile()).catch(() => false)));
-      if (intact.every(Boolean)) return cached.result;
+      if (intact.every(Boolean)) {
+        const runtimeFile = cached.assets.find((name) => /^(?:fastled|sketch)\.js$/i.test(name));
+        return { ...cached.result, ...(runtimeFile ? { runtimeUrl: `/builds/${id}/${runtimeFile}` } : {}) };
+      }
     }
     if (inFlight.has(id)) return inFlight.get(id);
     if (pending >= maxPending) throw new CompileError('Compiler queue is full. Try again after the current build.', 429);
@@ -140,7 +149,17 @@ export function createCompiler(options = {}) {
       await writeFile(join(sketch, 'pxlblz-frame-adapter.h'), adapter);
       for (const [name, contents] of sketchFiles) await writeFile(join(sketch, name), contents);
       const args = [sketch, '--just-compile', '--no-app', '--no-interactive', '--link', 'static', '--fastled-path', resolve(fastledPath)];
-      const diagnostics = await run(command, args, { cwd: work, timeoutMs });
+      const started = Date.now();
+      let diagnostics;
+      try {
+        diagnostics = await run(command, args, { cwd: work, timeoutMs });
+      } catch (error) {
+        const remaining = timeoutMs - (Date.now() - started);
+        if (!(error instanceof CompileError) || error.status !== 422 || !error.diagnostics.includes('C++ parsing exceeded its cooperative deadline') || remaining <= 0) throw error;
+        // Preserve all parser checks and the original deadline on one retry.
+        const retried = await run(command, args, { cwd: work, timeoutMs: remaining });
+        diagnostics = ('Retried once after the upstream Arduino parser deadline.\n' + retried).slice(-LOG_LIMIT);
+      }
       const files = await filesUnder(work);
       const candidates = files.filter((file) => /(?:fastled|sketch)\.(?:js|mjs)$/i.test(basename(file)));
       let modulePath;
@@ -161,7 +180,7 @@ export function createCompiler(options = {}) {
       const wasmFiles = (await readdir(directory)).filter((file) => file.endsWith('.wasm'));
       if (wasmFiles.length !== 1) throw new CompileError('Static compilation must produce exactly one WASM module.', 502, diagnostics);
       const wasmFile = wasmFiles[0];
-      const result = { id, moduleUrl: `/builds/${id}/module.mjs`, ...(wasmFile ? { wasmUrl: `/builds/${id}/${wasmFile}` } : {}), diagnostics, fastledVersion: FASTLED_VERSION };
+      const result = { id, moduleUrl: `/builds/${id}/module.mjs`, runtimeUrl: `/builds/${id}/${basename(modulePath)}`, wasmUrl: `/builds/${id}/${wasmFile}`, diagnostics, fastledVersion: FASTLED_VERSION };
       const assets = (await readdir(directory)).filter((file) => /\.(?:js|mjs|wasm|data|mem)$/.test(file));
       await writeFile(manifestPath, JSON.stringify({ result, assets, toolchain }));
       return result;
@@ -184,12 +203,12 @@ function json(response, status, value) {
 
 async function readJson(request) {
   if (!/^application\/json(?:;|$)/i.test(request.headers['content-type'] ?? '')) throw new CompileError('Content-Type must be application/json.', 415);
-  if (Number(request.headers['content-length']) > SOURCE_LIMIT + 65536) throw new CompileError('Request too large.', 413);
+  if (Number(request.headers['content-length']) > WIRE_LIMIT) throw new CompileError('Request too large.', 413);
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > SOURCE_LIMIT + 65536) throw new CompileError('Request too large.', 413);
+    if (size > WIRE_LIMIT) throw new CompileError('Request too large.', 413);
     chunks.push(chunk);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
@@ -219,7 +238,7 @@ export function createCompilerServer(options = {}) {
         const body = await readJson(request);
         const result = await compiler.compile(body?.source, body?.files);
         const base = `http://${host}`;
-        return json(response, 200, { ...result, moduleUrl: base + result.moduleUrl, ...(result.wasmUrl ? { wasmUrl: base + result.wasmUrl } : {}) });
+        return json(response, 200, { ...result, moduleUrl: base + result.moduleUrl, ...(result.runtimeUrl ? { runtimeUrl: base + result.runtimeUrl } : {}), ...(result.wasmUrl ? { wasmUrl: base + result.wasmUrl } : {}) });
       }
       const match = /^\/builds\/([a-f0-9]{64})\/([\w.-]+\.(?:mjs|js|wasm|data|mem))$/.exec(path);
       if (request.method === 'GET' && match) {

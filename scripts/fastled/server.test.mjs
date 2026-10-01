@@ -40,6 +40,7 @@ test('same source compiles once and produces an importable factory and adjacent 
   assert.deepEqual(first, second);
   assert.equal(runs, 1);
   assert.equal(first.fastledVersion, '3.10.4');
+  assert.equal(first.runtimeUrl, `/builds/${first.id}/fastled.js`);
   assert.match(first.moduleUrl, /^\/builds\/[a-f0-9]{64}\/module\.mjs$/);
   assert.equal(await readFile(join(root, first.moduleUrl), 'utf8'), 'var fastled = async () => ({ wasm: true });\nexport default fastled;\n');
   await compiler.compile('void setup(){} void loop(){}');
@@ -129,6 +130,14 @@ test('library/compiler revision participates in the immutable build identity', a
   assert.notEqual((await compiler.compile('source')).id, first.id);
 });
 
+test('rejects source extensions silently ignored by the upstream compiler', () => {
+  for (const name of ['helper.c', 'helper.C', 'helper.CPP', 'helper.Cpp', 'helper.cpP']) {
+    assert.throws(() => validateSketchFiles('source', { [name]: '' }), { status: 400, message: /Unsupported source extension/ });
+  }
+  const files = { 'helper.cpp': '', 'colors.H': '', 'palette.HpP': '' };
+  assert.equal(validateSketchFiles('source', files).length, 3);
+});
+
 test('refuses ambiguous dynamic WASM output despite a successful compiler exit', async (t) => {
   const { compiler } = await fixture(t, async (...args) => {
     const result = await fakeCompile(...args);
@@ -136,6 +145,27 @@ test('refuses ambiguous dynamic WASM output despite a successful compiler exit',
     return result;
   });
   await assert.rejects(compiler.compile('source'), { status: 502 });
+});
+
+test('retries exactly once for the upstream parser deadline within the original time budget', async (t) => {
+  let attempts = 0;
+  const budgets = [];
+  const { compiler } = await fixture(t, async (...args) => {
+    budgets.push(args[2].timeoutMs);
+    if (++attempts === 1) throw new CompileError('failed', 422, 'analyze Arduino sketch: C++ parsing exceeded its cooperative deadline');
+    return fakeCompile(...args);
+  });
+  const result = await compiler.compile('source');
+  assert.equal(attempts, 2);
+  assert.ok(budgets[1] <= budgets[0]);
+  assert.match(result.diagnostics, /Retried once/);
+  attempts = 0;
+  const failing = await fixture(t, async () => {
+    attempts++;
+    throw new CompileError('failed', 422, 'C++ parsing exceeded its cooperative deadline');
+  });
+  await assert.rejects(failing.compiler.compile('source'), { status: 422 });
+  assert.equal(attempts, 2);
 });
 
 test('HTTP enforces local origin, host, JSON, and asset path boundaries', async (t) => {
@@ -168,4 +198,22 @@ test('HTTP enforces local origin, host, JSON, and asset path boundaries', async 
 test('process failure and timeout return bounded diagnostics', async () => {
   await assert.rejects(runCompiler(process.execPath, ['-e', 'console.error("compiler-error");process.exit(2)'], { timeoutMs: 5000 }), (error) => error.status === 422 && error.diagnostics.includes('compiler-error'));
   await assert.rejects(runCompiler(process.execPath, ['-e', 'setInterval(()=>{},100)'], { timeoutMs: 50 }), { status: 504 });
+});
+
+test('HTTP accepts escaped JSON within the decoded source limit and still rejects oversized source', async (t) => {
+  const { compiler } = await fixture(t, fakeCompile);
+  const server = createCompilerServer({ compiler });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const endpoint = `http://127.0.0.1:${server.address().port}/compile`;
+  const source = '/*' + '\n'.repeat(600_000) + '*/\nvoid setup(){}\nvoid loop(){}';
+  const body = JSON.stringify({ source });
+  assert.ok(Buffer.byteLength(source) < 1024 * 1024);
+  assert.ok(Buffer.byteLength(body) > 1024 * 1024 + 65536);
+  const valid = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+  assert.equal(valid.status, 200);
+  const tooLarge = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: 'x'.repeat(1024 * 1024 + 1) }) });
+  assert.equal(tooLarge.status, 413);
+  assert.match((await tooLarge.json()).error, /1 MiB/);
 });
