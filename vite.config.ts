@@ -255,9 +255,14 @@ export default defineConfig(async ({ command, mode, isPreview }): Promise<ViteUs
       port,
       strictPort: true,
       allowedHosts: true,
-      // Native compiler copies contain their own tsconfig files. They are
-      // generated artifacts, not app source, and must not invalidate Vite.
-      watch: { ignored: ['**/test/fastled/.cache/**'] },
+      // Native compiler/toolchain copies contain their own tsconfig, HTML and
+      // frontend files. They are generated/test inputs, not app source, and
+      // must not invalidate or reload the IDE while performance tests run.
+      watch: { ignored: [
+        '**/test/fastled/.cache/**',
+        '**/FastLED-3.10.4/**',
+        '**/fastled-cli/**',
+      ] },
       // A worktree may link the checked-out dependency tree during local QA.
       // Permit Vite's font imports through that resolved path so the browser
       // smoke's console oracle still catches application errors rather than
@@ -283,6 +288,10 @@ export default defineConfig(async ({ command, mode, isPreview }): Promise<ViteUs
       dedupe: ['react', 'react-dom'],
     },
     optimizeDeps: {
+      // CI checks out FastLED and its CLI underneath the repository root. Keep
+      // Vite's dependency crawler on the actual app entry so vendor/demo HTML
+      // cannot inject unrelated dependency scans or hot reloads.
+      entries: ['index.html'],
       // Browser Mode discovers component-test dependencies after its worker has
       // started. Pre-bundle the layout suite's graph so Vite never reloads the
       // browser mid-run and silently drops the product-surface tests (#765).
