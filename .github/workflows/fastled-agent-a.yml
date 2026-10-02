@@ -1,0 +1,157 @@
+name: FastLED CLI patch proof
+
+on:
+  push:
+    branches:
+      - agent/fastled-cli-patch
+    paths:
+      - ".github/workflows/fastled-agent-a.yml"
+      - "vendor/fastled-cli/**"
+      - "scripts/fastled/**"
+      - "test/fastled/configuration/**"
+      - "src/engine/fastled/examples/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  agent-a:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      FASTLED_CLI_COMMIT: bb1d619c1d64194198f9c68ac852fc79e6a01d9e
+      FASTLED_COMMIT: adedfc40e73fb80f8e930318781036d8fe1dbd9f
+      FASTLED_PATH: ${{ github.workspace }}/FastLED-3.10.4
+      FASTLED_CLI: ${{ github.workspace }}/fastled-cli/target/release/fastled
+      UV_PYTHON: "3.12"
+      FASTLED_PYTHON_EXECUTABLE: "python3"
+
+    steps:
+      - name: Checkout PXLBLZ agent branch
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned FastLED CLI
+        uses: actions/checkout@v4
+        with:
+          repository: FastLED/cli
+          ref: ${{ env.FASTLED_CLI_COMMIT }}
+          path: fastled-cli
+
+      - name: Checkout pinned FastLED 3.10.4
+        uses: actions/checkout@v4
+        with:
+          repository: FastLED/FastLED
+          ref: ${{ env.FASTLED_COMMIT }}
+          path: FastLED-3.10.4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Verify and apply CLI patch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git -C fastled-cli rev-parse HEAD)" = "$FASTLED_CLI_COMMIT"
+          test "$(git -C FastLED-3.10.4 rev-parse HEAD)" = "$FASTLED_COMMIT"
+          sha256sum vendor/fastled-cli/patches/0001-preserve-sketch-configuration.patch | tee agent-a-patch.sha256
+          git -C fastled-cli apply --check "$GITHUB_WORKSPACE/vendor/fastled-cli/patches/0001-preserve-sketch-configuration.patch"
+          git -C fastled-cli apply "$GITHUB_WORKSPACE/vendor/fastled-cli/patches/0001-preserve-sketch-configuration.patch"
+          git -C fastled-cli diff --check
+
+      - name: Rust preprocessor tests
+        shell: bash
+        run: |
+          set -euxo pipefail
+          start=$(date +%s%3N)
+          cargo test --manifest-path fastled-cli/Cargo.toml -p fastled-cli --no-default-features sketch_preprocessor 2>&1 | tee agent-a-rust-tests.log
+          end=$(date +%s%3N)
+          echo "$((end-start))" > agent-a-rust-tests-ms.txt
+
+      - name: Build headless release CLI
+        shell: bash
+        run: |
+          set -euxo pipefail
+          start=$(date +%s%3N)
+          cargo build --manifest-path fastled-cli/Cargo.toml -p fastled-cli --no-default-features --release 2>&1 | tee agent-a-cargo-build.log
+          end=$(date +%s%3N)
+          echo "$((end-start))" > agent-a-cargo-build-ms.txt
+          "$FASTLED_CLI" --version | tee agent-a-cli-version.txt
+          sha256sum "$FASTLED_CLI" | tee agent-a-cli.sha256
+
+      - name: Start production compiler service
+        shell: bash
+        run: |
+          set -euxo pipefail
+          "$FASTLED_CLI" --version
+          node scripts/fastled/server.mjs >agent-a-server.log 2>&1 &
+          echo $! > agent-a-server.pid
+          for i in $(seq 1 120); do
+            if curl --fail --silent http://127.0.0.1:9982/health > agent-a-health.json; then
+              cat agent-a-health.json
+              exit 0
+            fi
+            sleep 1
+          done
+          cat agent-a-server.log
+          exit 1
+
+      - name: Verify HSV and prototype fixtures
+        shell: bash
+        run: |
+          set -euxo pipefail
+          node scripts/fastled/configuration-proof.mjs agent-a-configuration-proof.json 2>&1 | tee agent-a-configuration-proof.log
+
+      - name: Compile all six original examples through production service
+        shell: bash
+        run: |
+          set -euxo pipefail
+          node scripts/fastled/compile-examples.mjs agent-a-production-compile-proof.json 2>&1 | tee agent-a-six-examples.log
+
+      - name: Write machine-readable run metadata
+        if: always()
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const read = (p) => {
+            try { return fs.readFileSync(p, 'utf8').trim(); } catch { return null; }
+          };
+          const shaLine = read('agent-a-patch.sha256');
+          const cliShaLine = read('agent-a-cli.sha256');
+          const data = {
+            schemaVersion: 1,
+            capturedAt: new Date().toISOString(),
+            pxlblzCommit: process.env.GITHUB_SHA,
+            cliUpstreamCommit: process.env.FASTLED_CLI_COMMIT,
+            fastledCommit: process.env.FASTLED_COMMIT,
+            patchSha256: shaLine?.split(/\s+/)[0] ?? null,
+            cliVersion: read('agent-a-cli-version.txt'),
+            cliBinarySha256: cliShaLine?.split(/\s+/)[0] ?? null,
+            rustPreprocessorTestsMs: Number(read('agent-a-rust-tests-ms.txt')) || null,
+            releaseBuildMs: Number(read('agent-a-cargo-build-ms.txt')) || null,
+            commands: [
+              'git apply --check vendor/fastled-cli/patches/0001-preserve-sketch-configuration.patch',
+              'cargo test -p fastled-cli --no-default-features sketch_preprocessor',
+              'cargo build -p fastled-cli --no-default-features --release',
+              'node scripts/fastled/configuration-proof.mjs agent-a-configuration-proof.json',
+              'node scripts/fastled/compile-examples.mjs agent-a-production-compile-proof.json'
+            ]
+          };
+          fs.writeFileSync('agent-a-metadata.json', JSON.stringify(data, null, 2) + '\n');
+          NODE
+
+      - name: Upload Agent A evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fastled-agent-a-evidence
+          if-no-files-found: error
+          path: |
+            agent-a-*.json
+            agent-a-*.log
+            agent-a-*.txt
+            agent-a-*.sha256
