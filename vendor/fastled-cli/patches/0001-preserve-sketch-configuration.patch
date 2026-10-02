@@ -26,7 +26,8 @@ index 9296083..6b8725b 100644
 +++ b/crates/fastled-cli/src/sketch_preprocessor.rs
 @@ -404,23 +404,45 @@ fn preprocess(
          .join("\n");
-     let (prototypes, prototype_offset) = analyze_function_prototypes(&combined)?;
+-    let prototypes = extract_function_prototypes(&combined)?;
++    let (prototypes, prototype_offset) = analyze_function_prototypes(&combined)?;
      let prototype_declarations = render_prototype_declarations(&prototypes);
      let prototype_header = format!(
          "#pragma once\n// Auto-generated Arduino sketch prototypes.\n{prototype_declarations}"
