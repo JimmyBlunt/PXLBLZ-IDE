@@ -69,6 +69,19 @@ describe('FastLED workspace', () => {
     expect(screen.getByText('Copied official example into an editable sketch.')).toBeInTheDocument()
   })
 
+  it('falls back to production compilation when an example has no valid preview artifact', async () => {
+    render(<FastLedWorkspace onClose={vi.fn()} />)
+    fireEvent.change(screen.getByRole('combobox', { name: 'Official example' }), { target: { value: 'Animartrix' } })
+    expect(mocks.compile).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Compile & run' }))
+    await waitFor(() => expect(mocks.compile).toHaveBeenCalledOnce())
+    expect(mocks.compile.mock.calls[0][0]).toMatchObject({
+      source: '#include <FastLED.h>\nvoid loop() { FastLED.show(); }',
+      files: {},
+      compilerUrl: 'http://127.0.0.1:9982',
+    })
+  })
+
   it('cancels initialization and disposes a late runtime without replacing the source', async () => {
     const runtime = makeRuntime()
     let finish!: (value: ReturnType<typeof makeRuntime>) => void
