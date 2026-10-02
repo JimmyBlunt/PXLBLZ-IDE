@@ -1,0 +1,321 @@
+name: FastLED final acceptance
+
+on:
+  push:
+    branches:
+      - feature/fastled-runtime
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FASTLED_CLI_COMMIT: bb1d619c1d64194198f9c68ac852fc79e6a01d9e
+  FASTLED_COMMIT: adedfc40e73fb80f8e930318781036d8fe1dbd9f
+  FASTLED_PATH: ${{ github.workspace }}/FastLED-3.10.4
+  FASTLED_CLI: ${{ github.workspace }}/fastled-cli/target/release/fastled
+  UV_PYTHON: "3.12"
+  FASTLED_PYTHON_EXECUTABLE: "python3"
+
+jobs:
+  synced-main:
+    name: Gate · current main included
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify current main is an ancestor
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git fetch origin main
+          git merge-base --is-ancestor origin/main HEAD
+          {
+            echo "candidate=$(git rev-parse HEAD)"
+            echo "main=$(git rev-parse origin/main)"
+            echo "merge_base=$(git merge-base origin/main HEAD)"
+          } | tee final-sync-identity.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fastled-final-sync-identity
+          path: final-sync-identity.txt
+
+  static-review:
+    name: Gate · independent static review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Audit scope, wording, provenance and local paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "candidate=$(git rev-parse HEAD)"
+            echo
+            echo "[absolute local paths]"
+            git grep -nE '([A-Za-z]:\\Users\\|/Users/[^/]+/|/home/[^/]+/)' --               'src/**' 'scripts/fastled/**' 'test/fastled/**' 'docs/fastled/**' 'vendor/fastled-cli/**' || true
+            echo
+            echo "[ArtNet references in FastLED-scoped files]"
+            git grep -niE 'artnet|art-net' --               'src/engine/fastled/**' 'scripts/fastled/**' 'test/fastled/**' 'docs/fastled/**' 'vendor/fastled-cli/**' || true
+            echo
+            echo "[broad compatibility wording candidates]"
+            git grep -niE 'all (arduino|boards|hardware)|universal compatibility|works on every|100% compatible' --               'src/engine/fastled/**' 'scripts/fastled/**' 'test/fastled/**' 'docs/fastled/**' || true
+            echo
+            echo "[license/provenance]"
+            find src/engine/fastled test/fastled docs/fastled -maxdepth 6 -type f               \( -iname '*license*' -o -iname '*provenance*' -o -iname '*manifest*' \) -print 2>/dev/null | sort || true
+          } | tee fastled-final-static-review.txt
+          test -s docs/fastled/acceptance.md
+          test -s docs/fastled/validation.md
+          test -s src/engine/fastled/examples/LICENSE.FastLED
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fastled-final-static-review
+          path: fastled-final-static-review.txt
+
+  repo-regression:
+    name: Gate · full repository regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test:full
+      - run: npm run build
+
+  cli-proof:
+    name: Gate · patched official FastLED CLI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: FastLED/cli
+          ref: ${{ env.FASTLED_CLI_COMMIT }}
+          path: fastled-cli
+      - uses: actions/checkout@v4
+        with:
+          repository: FastLED/FastLED
+          ref: ${{ env.FASTLED_COMMIT }}
+          path: FastLED-3.10.4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v6
+      - name: Apply pinned patch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git -C fastled-cli apply --check "$GITHUB_WORKSPACE/vendor/fastled-cli/patches/0001-preserve-sketch-configuration.patch"
+          git -C fastled-cli apply "$GITHUB_WORKSPACE/vendor/fastled-cli/patches/0001-preserve-sketch-configuration.patch"
+          git -C fastled-cli diff --check
+      - name: Rust preprocessor proof
+        run: cargo test --manifest-path fastled-cli/Cargo.toml -p fastled-cli --no-default-features sketch_preprocessor
+      - name: Build headless CLI
+        run: cargo build --manifest-path fastled-cli/Cargo.toml -p fastled-cli --no-default-features --release
+      - name: Start compiler service
+        shell: bash
+        run: |
+          set -euxo pipefail
+          node scripts/fastled/server.mjs >final-cli-server.log 2>&1 &
+          for i in $(seq 1 120); do
+            curl --fail --silent http://127.0.0.1:9982/health >final-cli-health.json && exit 0
+            sleep 1
+          done
+          cat final-cli-server.log
+          exit 1
+      - name: Exact configuration fixtures
+        run: node scripts/fastled/configuration-proof.mjs final-configuration-proof.json
+      - name: Six standard examples
+        run: node scripts/fastled/compile-examples.mjs final-six-example-proof.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fastled-final-cli-proof
+          if-no-files-found: warn
+          path: |
+            final-*.json
+            final-*.log
+
+  parity:
+    name: Gate · deterministic native/WASM parity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/checkout@v4
+        with:
+          repository: FastLED/cli
+          ref: ${{ env.FASTLED_CLI_COMMIT }}
+          path: fastled-cli
+      - uses: actions/checkout@v4
+        with:
+          repository: FastLED/FastLED
+          ref: ${{ env.FASTLED_COMMIT }}
+          path: FastLED-3.10.4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v6
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.13.0
+      - name: Build patched CLI
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git -C fastled-cli apply "$GITHUB_WORKSPACE/vendor/fastled-cli/patches/0001-preserve-sketch-configuration.patch"
+          cargo build --manifest-path fastled-cli/Cargo.toml -p fastled-cli --no-default-features --release
+      - name: Prepare deterministic corpus
+        run: node test/fastled/prepare.mjs "$FASTLED_PATH"
+      - name: Build and run native reference
+        run: |
+          node test/fastled/build-native.mjs
+          node test/fastled/run-native.mjs
+      - name: Build and run WASM corpus
+        run: |
+          node test/fastled/build-wasm.mjs
+          node test/fastled/run-corpus.mjs test/fastled/.cache/wasm/modules.json
+      - name: Exact byte parity and source hashes
+        run: node --test test/fastled/compare.test.mjs test/fastled/source-hash.test.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fastled-final-parity
+          if-no-files-found: warn
+          path: |
+            test/fastled/.cache/**
+            test/fastled/evidence/**
+
+  matrix:
+    name: Gate · matrix/performance · ${{ matrix.example }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        example:
+          - Animartrix
+          - WasmScreenCoords
+    env:
+      FASTLED_MATRIX_CASE: ${{ matrix.example }}
+      FASTLED_COMPILER_URL: http://127.0.0.1:9982
+      FASTLED_IDE_URL: http://127.0.0.1:5184/PXLBLZ-IDE/fastled
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - uses: actions/checkout@v4
+        with:
+          repository: FastLED/cli
+          ref: ${{ env.FASTLED_CLI_COMMIT }}
+          path: fastled-cli
+      - uses: actions/checkout@v4
+        with:
+          repository: FastLED/FastLED
+          ref: ${{ env.FASTLED_COMMIT }}
+          path: FastLED-3.10.4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v6
+      - name: Build patched CLI
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git -C fastled-cli apply "$GITHUB_WORKSPACE/vendor/fastled-cli/patches/0001-preserve-sketch-configuration.patch"
+          cargo build --manifest-path fastled-cli/Cargo.toml -p fastled-cli --no-default-features --release
+      - name: Start compiler and isolated IDE
+        shell: bash
+        run: |
+          set -euxo pipefail
+          node scripts/fastled/server.mjs >"final-${FASTLED_MATRIX_CASE}-server.log" 2>&1 &
+          npm run dev -- --host 127.0.0.1 --port 5184 >"final-${FASTLED_MATRIX_CASE}-vite.log" 2>&1 &
+          for i in $(seq 1 150); do
+            if curl --fail --silent http://127.0.0.1:9982/health >/dev/null &&                curl --fail --silent http://127.0.0.1:5184/PXLBLZ-IDE/fastled >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+      - name: Matrix and performance acceptance
+        run: node scripts/fastled/matrix-proof.mjs "final-${FASTLED_MATRIX_CASE}-evidence.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fastled-final-matrix-${{ matrix.example }}
+          if-no-files-found: warn
+          path: final-${{ matrix.example }}-*
+
+  browser:
+    name: Gate · real browser acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      FASTLED_COMPILER_URL: http://127.0.0.1:9982
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - uses: actions/checkout@v4
+        with:
+          repository: FastLED/cli
+          ref: ${{ env.FASTLED_CLI_COMMIT }}
+          path: fastled-cli
+      - uses: actions/checkout@v4
+        with:
+          repository: FastLED/FastLED
+          ref: ${{ env.FASTLED_COMMIT }}
+          path: FastLED-3.10.4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v6
+      - name: Build patched CLI
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git -C fastled-cli apply "$GITHUB_WORKSPACE/vendor/fastled-cli/patches/0001-preserve-sketch-configuration.patch"
+          cargo build --manifest-path fastled-cli/Cargo.toml -p fastled-cli --no-default-features --release
+      - name: Start compiler and IDE
+        shell: bash
+        run: |
+          set -euxo pipefail
+          node scripts/fastled/server.mjs >final-browser-server.log 2>&1 &
+          npm run dev -- --host 127.0.0.1 --port 5184 >final-browser-vite.log 2>&1 &
+          for i in $(seq 1 150); do
+            if curl --fail --silent http://127.0.0.1:9982/health >/dev/null &&                curl --fail --silent http://127.0.0.1:5184/PXLBLZ-IDE/fastled >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+      - run: node scripts/fastled/browser-proof.mjs
+      - run: node scripts/fastled/workspace-run-proof.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fastled-final-browser
+          if-no-files-found: warn
+          path: |
+            docs/fastled/evidence/**
+            final-browser-*.log
