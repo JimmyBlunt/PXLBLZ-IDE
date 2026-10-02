@@ -10,6 +10,15 @@ on:
       - "scripts/fastled/**"
       - "test/fastled/configuration/**"
       - "src/engine/fastled/examples/**"
+  pull_request:
+    branches:
+      - feature/fastled-runtime
+    paths:
+      - ".github/workflows/fastled-agent-a.yml"
+      - "vendor/fastled-cli/**"
+      - "scripts/fastled/**"
+      - "test/fastled/configuration/**"
+      - "src/engine/fastled/examples/**"
   workflow_dispatch:
 
 permissions:
