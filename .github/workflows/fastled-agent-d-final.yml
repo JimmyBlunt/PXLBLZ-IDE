@@ -1,0 +1,100 @@
+name: FastLED final combined review
+
+on:
+  push:
+    branches:
+      - agent/fastled-review-final
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-review:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Independent static audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "candidate=$(git rev-parse HEAD)"
+            echo
+            echo "[absolute local paths]"
+            git grep -nE '([A-Za-z]:\\Users\\|/Users/[^/]+/|/home/[^/]+/)' --               'src/**' 'scripts/fastled/**' 'test/fastled/**' 'docs/fastled/**' 'vendor/fastled-cli/**' || true
+            echo
+            echo "[ArtNet references in FastLED-scoped files]"
+            git grep -niE 'artnet|art-net' --               'src/engine/fastled/**' 'scripts/fastled/**' 'test/fastled/**' 'docs/fastled/**' 'vendor/fastled-cli/**' || true
+            echo
+            echo "[unsupported broad compatibility wording]"
+            git grep -niE 'all (arduino|boards|hardware)|universal compatibility|works on every|100% compatible' --               'src/engine/fastled/**' 'scripts/fastled/**' 'test/fastled/**' 'docs/fastled/**' || true
+            echo
+            echo "[provenance and license]"
+            find src/engine/fastled test/fastled docs/fastled -maxdepth 6 -type f               \( -iname '*license*' -o -iname '*provenance*' -o -iname '*manifest*' \) -print 2>/dev/null | sort || true
+          } | tee fastled-d-final-static.txt
+          test -s docs/fastled/acceptance.md
+          test -s docs/fastled/validation.md
+          test -s src/engine/fastled/examples/LICENSE.FastLED
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fastled-d-final-static
+          path: fastled-d-final-static.txt
+
+  focused-fastled:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Combined FastLED suites
+        run: npx vitest run src/engine/fastled src/components/FastLedWorkspace.test.tsx
+      - name: Compiler service unit tests
+        run: node --test scripts/fastled/server.test.mjs
+      - name: FastLED lint
+        run: npx eslint src/engine/fastled src/components/FastLedWorkspace.tsx src/components/FastLedWorkspace.test.tsx
+      - name: Production build
+        run: npm run build
+
+  full-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test:full
+      - run: npm run build
+
+  scope-review:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify FastLED feature scope against feature base
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git fetch origin feature/fastled-runtime
+          git diff --name-status origin/feature/fastled-runtime...HEAD | tee fastled-d-final-scope.txt
+          if git diff --name-only origin/feature/fastled-runtime...HEAD | grep -qiE '(^|/)(artnet|art-net)(/|\.|$)'; then
+            echo "Unexpected ArtNet path touched by FastLED candidate" >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fastled-d-final-scope
+          path: fastled-d-final-scope.txt
