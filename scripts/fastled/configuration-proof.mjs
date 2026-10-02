@@ -58,9 +58,13 @@ for (const fixture of fixtures) {
     const assetResponse = await fetch(url, { signal: AbortSignal.timeout(60_000) });
     assert.equal(assetResponse.status, 200);
     const bytes = Buffer.from(await assetResponse.arrayBuffer());
-    const file = resolve(fixtureDir, basename(url.pathname));
+    // The upstream CLI emits a classic Node/CommonJS runtime. Keep the WASM
+    // filename unchanged, but give the JavaScript runtime an explicit .cjs
+    // extension so modern Node does not syntax-detect it as an ES module.
+    const outputName = field === 'runtimeUrl' ? 'fastled-runtime.cjs' : basename(url.pathname);
+    const file = resolve(fixtureDir, outputName);
     await writeFile(file, bytes);
-    assets[field] = { file: basename(file), bytes: bytes.length, sha256: sha256(bytes) };
+    assets[field] = { file: outputName, upstreamFilename: basename(url.pathname), bytes: bytes.length, sha256: sha256(bytes) };
   }
 
   const resultPath = resolve(fixtureDir, 'result.json');
