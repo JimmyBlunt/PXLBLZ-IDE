@@ -1,0 +1,148 @@
+name: FastLED matrix example proof
+
+on:
+  push:
+    branches:
+      - agent/fastled-matrix
+    paths:
+      - ".github/workflows/fastled-agent-b.yml"
+      - "scripts/fastled/**"
+      - "test/fastled/matrix/**"
+      - "vendor/fastled-cli/**"
+      - "src/engine/fastled/**"
+      - "vite.config.ts"
+      - "package.json"
+      - "package-lock.json"
+  workflow_dispatch:
+
+concurrency:
+  group: fastled-agent-b-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  example:
+    name: Agent B · ${{ matrix.example }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        example:
+          - Animartrix
+          - WasmScreenCoords
+    env:
+      FASTLED_MATRIX_CASE: ${{ matrix.example }}
+      FASTLED_CLI_COMMIT: bb1d619c1d64194198f9c68ac852fc79e6a01d9e
+      FASTLED_COMMIT: adedfc40e73fb80f8e930318781036d8fe1dbd9f
+      FASTLED_PATH: ${{ github.workspace }}/FastLED-3.10.4
+      FASTLED_CLI: ${{ github.workspace }}/fastled-cli/target/release/fastled
+      UV_PYTHON: "3.12"
+      FASTLED_PYTHON_EXECUTABLE: "python3"
+      FASTLED_COMPILER_URL: http://127.0.0.1:9982
+      FASTLED_IDE_URL: http://127.0.0.1:5184/PXLBLZ-IDE/fastled
+
+    steps:
+      - name: Checkout PXLBLZ matrix branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Checkout pinned FastLED CLI
+        uses: actions/checkout@v4
+        with:
+          repository: FastLED/cli
+          ref: ${{ env.FASTLED_CLI_COMMIT }}
+          path: fastled-cli
+
+      - name: Checkout pinned FastLED 3.10.4
+        uses: actions/checkout@v4
+        with:
+          repository: FastLED/FastLED
+          ref: ${{ env.FASTLED_COMMIT }}
+          path: FastLED-3.10.4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fastled-cli
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Apply proven CLI patch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "$(git -C fastled-cli rev-parse HEAD)" = "$FASTLED_CLI_COMMIT"
+          test "$(git -C FastLED-3.10.4 rev-parse HEAD)" = "$FASTLED_COMMIT"
+          git -C fastled-cli apply --check "$GITHUB_WORKSPACE/vendor/fastled-cli/patches/0001-preserve-sketch-configuration.patch"
+          git -C fastled-cli apply "$GITHUB_WORKSPACE/vendor/fastled-cli/patches/0001-preserve-sketch-configuration.patch"
+          git -C fastled-cli diff --check
+
+      - name: Build headless FastLED CLI
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cargo build --manifest-path fastled-cli/Cargo.toml -p fastled-cli --no-default-features --release 2>&1 | tee "agent-b-${FASTLED_MATRIX_CASE}-cargo.log"
+          "$FASTLED_CLI" --version | tee "agent-b-${FASTLED_MATRIX_CASE}-cli-version.txt"
+
+      - name: Start production compiler service
+        shell: bash
+        run: |
+          set -euxo pipefail
+          node scripts/fastled/server.mjs >"agent-b-${FASTLED_MATRIX_CASE}-server.log" 2>&1 &
+          for i in $(seq 1 120); do
+            if curl --fail --silent http://127.0.0.1:9982/health >"agent-b-${FASTLED_MATRIX_CASE}-health.json"; then
+              cat "agent-b-${FASTLED_MATRIX_CASE}-health.json"
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "agent-b-${FASTLED_MATRIX_CASE}-server.log"
+          exit 1
+
+      - name: Start isolated Vite IDE
+        shell: bash
+        run: |
+          set -euxo pipefail
+          npm run dev -- --host 127.0.0.1 --port 5184 >"agent-b-${FASTLED_MATRIX_CASE}-vite.log" 2>&1 &
+          for i in $(seq 1 120); do
+            if curl --fail --silent http://127.0.0.1:5184/PXLBLZ-IDE/fastled >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "agent-b-${FASTLED_MATRIX_CASE}-vite.log"
+          exit 1
+
+      - name: Run independent matrix example proof
+        shell: bash
+        run: |
+          set -euxo pipefail
+          node scripts/fastled/matrix-proof.mjs "agent-b-${FASTLED_MATRIX_CASE}-evidence.json" 2>&1 | tee "agent-b-${FASTLED_MATRIX_CASE}-proof.log"
+
+      - name: Upload example evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fastled-agent-b-${{ matrix.example }}
+          if-no-files-found: warn
+          path: |
+            agent-b-${{ matrix.example }}-*
