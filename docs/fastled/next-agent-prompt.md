@@ -44,7 +44,7 @@ mit dieser Binärdatei über `FASTLED_CLI`. Prüfe:
 - [`fastled-prototype-order.ino`](https://github.com/JimmyBlunt/PXLBLZ-IDE/blob/feature/fastled-runtime/scripts/fastled/fixtures/fastled-prototype-order.ino)
   kompiliert unverändert und liefert `[17,34,51]`.
 - Alle sechs Quellen im
-  [Upstream-Testkorpus](https://github.com/JimmyBlunt/PXLBLZ-IDE/tree/feature/fastled-runtime/test/fastled/upstream)
+  [unveränderten IDE-Beispielquellen](https://github.com/JimmyBlunt/PXLBLZ-IDE/tree/feature/fastled-runtime/src/engine/fastled/examples)
   kompilieren unverändert.
 - Der Patch lässt sich auf einem frischen Clone reproduzierbar anwenden.
 
@@ -81,7 +81,7 @@ Implementiere in der PXLBLZ-IDE einen eigenen sichtbaren Bereich/Ordner
 eine versionierte Manifestdatei mit Titel, relativen Quelldateien,
 FastLED-Version, Upstream-Commit, Lizenz/Provenienz, Dimension und optionalem
 Vorschau-Artefakt. Starte mit den bereits geprüften Quellen im
-[`Upstream-Testkorpus`](https://github.com/JimmyBlunt/PXLBLZ-IDE/tree/feature/fastled-runtime/test/fastled/upstream)
+[`IDE-Beispielkorpus`](https://github.com/JimmyBlunt/PXLBLZ-IDE/tree/feature/fastled-runtime/src/engine/fastled/examples)
 plus den beiden Matrix-Abnahmekandidaten. Die Originalquellen müssen unverändert
 bleiben; IDE-spezifische Metadaten liegen separat. Ein Vorschau-Cache ist
 zulässig, wenn sein Schlüssel mindestens Quellhash, Compilerfingerprint,
