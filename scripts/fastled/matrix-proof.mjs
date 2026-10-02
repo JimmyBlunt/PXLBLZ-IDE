@@ -108,19 +108,73 @@ try {
 
     const runtime = await page.evaluate(async ({ artifact, name }) => {
       const { createFastLedRuntime } = await import('/PXLBLZ-IDE/src/engine/fastled/index.ts');
+
+      const summarize = values => {
+        const sorted = [...values].sort((a, b) => a - b);
+        const percentile = p => sorted.length
+          ? sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p))]
+          : null;
+        return {
+          samples: sorted.length,
+          maxMs: sorted.length ? sorted[sorted.length - 1] : null,
+          p95Ms: percentile(0.95),
+          p99Ms: percentile(0.99),
+          topMs: sorted.slice(-10).reverse(),
+        };
+      };
+
+      async function responsivenessWindow(durationMs) {
+        const gaps = [];
+        const longTasks = [];
+        let lastTick = performance.now();
+        const supportedLongTask = globalThis.PerformanceObserver?.supportedEntryTypes?.includes('longtask') ?? false;
+        const observer = supportedLongTask
+          ? new PerformanceObserver(list => {
+              for (const entry of list.getEntries()) longTasks.push(entry.duration);
+            })
+          : null;
+        observer?.observe({ type: 'longtask', buffered: false });
+        const timer = setInterval(() => {
+          const now = performance.now();
+          gaps.push(now - lastTick);
+          lastTick = now;
+        }, 10);
+        await new Promise(resolve => setTimeout(resolve, durationMs));
+        clearInterval(timer);
+        observer?.disconnect();
+        return {
+          intervalGap: summarize(gaps),
+          longTask: summarize(longTasks),
+          longTaskSupported: supportedLongTask,
+        };
+      }
+
+      // Same document, same Chromium process, no FastLED runtime. If this
+      // baseline already contains a large one-off scheduler gap then the raw
+      // max interval gap cannot be attributed to the FastLED worker.
+      const baselineResponsiveness = await responsivenessWindow(2_000);
+
       const frames = [];
       const frameTimes = [];
+      const frameCallbackMs = [];
+      const layoutCallbackMs = [];
       let latestLayout = [];
       const failures = [];
       const initStarted = performance.now();
       const worker = await createFastLedRuntime({
         artifact,
         onFrame(frame) {
-          frameTimes.push(performance.now());
+          const started = performance.now();
+          frameTimes.push(started);
           if (frames.length < 2) frames.push(new Uint8Array(frame));
           else frames[1] = new Uint8Array(frame);
+          frameCallbackMs.push(performance.now() - started);
         },
-        onLayout(positions) { latestLayout = positions.map(([x, y]) => [x, y]); },
+        onLayout(positions) {
+          const started = performance.now();
+          latestLayout = positions.map(([x, y]) => [x, y]);
+          layoutCallbackMs.push(performance.now() - started);
+        },
         onError(message) { failures.push(message); },
       });
       const initializationMs = performance.now() - initStarted;
@@ -134,26 +188,14 @@ try {
 
       // Responsiveness is a steady-state gate. Initialization/module startup is
       // measured separately above and must not contaminate the browser event-loop
-      // probe. This also makes the 250 ms threshold about sustained playback,
-      // rather than one-time WASM/layout startup work.
-      const gaps = [];
-      let lastTick = performance.now();
+      // probe. Capture both raw interval jitter and the browser Long Tasks API,
+      // plus callback cost, so a failure can be attributed instead of guessed.
       const measurementStartFrames = frameTimes.length;
       const measurementStarted = performance.now();
-      const timer = setInterval(() => {
-        const now = performance.now();
-        gaps.push(now - lastTick);
-        lastTick = now;
-      }, 10);
-      await new Promise(resolve => setTimeout(resolve, 2_000));
-      clearInterval(timer);
+      const activeResponsiveness = await responsivenessWindow(3_000);
       worker.pause();
       const measurementElapsedMs = performance.now() - measurementStarted;
       const measuredFrames = frameTimes.length - measurementStartFrames;
-      const sortedGaps = [...gaps].sort((a, b) => a - b);
-      const percentile = p => sortedGaps.length
-        ? sortedGaps[Math.min(sortedGaps.length - 1, Math.floor((sortedGaps.length - 1) * p))]
-        : null;
       const beforeReset = frameTimes.length;
       worker.reset();
       worker.start();
@@ -190,11 +232,18 @@ try {
         layoutCount: latestLayout.length,
         sampleLayout,
         steadyStateFps: measuredFrames / (measurementElapsedMs / 1000),
-        mainThreadMaxGapMs: sortedGaps.length ? sortedGaps[sortedGaps.length - 1] : null,
-        mainThreadP95GapMs: percentile(0.95),
-        mainThreadP99GapMs: percentile(0.99),
-        mainThreadGapSamples: sortedGaps.length,
-        mainThreadTopGapsMs: sortedGaps.slice(-10).reverse(),
+        mainThreadMaxGapMs: activeResponsiveness.intervalGap.maxMs,
+        mainThreadP95GapMs: activeResponsiveness.intervalGap.p95Ms,
+        mainThreadP99GapMs: activeResponsiveness.intervalGap.p99Ms,
+        mainThreadGapSamples: activeResponsiveness.intervalGap.samples,
+        mainThreadTopGapsMs: activeResponsiveness.intervalGap.topMs,
+        longTaskSupported: activeResponsiveness.longTaskSupported,
+        mainThreadLongTaskMaxMs: activeResponsiveness.longTask.maxMs,
+        mainThreadLongTaskP95Ms: activeResponsiveness.longTask.p95Ms,
+        mainThreadLongTaskCount: activeResponsiveness.longTask.samples,
+        baselineResponsiveness,
+        frameCallback: summarize(frameCallbackMs),
+        layoutCallback: summarize(layoutCallbackMs),
         resetRecovered,
         failures,
       };
@@ -224,6 +273,15 @@ try {
       initializationMs: runtime.initializationMs,
       steadyStateFps: runtime.steadyStateFps,
       mainThreadMaxGapMs: runtime.mainThreadMaxGapMs,
+      mainThreadP95GapMs: runtime.mainThreadP95GapMs,
+      mainThreadP99GapMs: runtime.mainThreadP99GapMs,
+      mainThreadLongTaskMaxMs: runtime.mainThreadLongTaskMaxMs,
+      mainThreadLongTaskCount: runtime.mainThreadLongTaskCount,
+      baselineMainThreadMaxGapMs: runtime.baselineResponsiveness.intervalGap.maxMs,
+      baselineMainThreadP99GapMs: runtime.baselineResponsiveness.intervalGap.p99Ms,
+      frameCallbackMaxMs: runtime.frameCallback.maxMs,
+      frameCallbackP99Ms: runtime.frameCallback.p99Ms,
+      layoutCallbackMaxMs: runtime.layoutCallback.maxMs,
     };
     const checks = {
       coldCompile: performanceResult.coldCompileMs <= thresholds.coldCompileMsMax,
