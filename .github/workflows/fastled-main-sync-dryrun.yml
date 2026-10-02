@@ -134,7 +134,8 @@ jobs:
             printf 'main merge conflicts:\n%s\n' "$conflicts" | tee future-candidate.txt
             test "$conflicts" = "vite.config.ts"
             git checkout --theirs vite.config.ts
-            node scripts/fastled/resolve-main-vite.mjs
+            git show origin/agent/fastled-main-sync-dryrun:scripts/fastled/resolve-main-vite.mjs > /tmp/resolve-main-vite.mjs
+            node /tmp/resolve-main-vite.mjs
             git add vite.config.ts
             git commit --no-edit
             echo "resolved expected vite.config.ts conflict" | tee -a future-candidate.txt
