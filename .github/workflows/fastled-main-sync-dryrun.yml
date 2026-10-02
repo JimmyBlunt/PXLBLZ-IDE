@@ -37,6 +37,11 @@ jobs:
           ref: feature/fastled-runtime
           fetch-depth: 0
 
+      - name: Configure ephemeral merge identity
+        run: |
+          git config user.name "FastLED CI Dry Run"
+          git config user.email "fastled-dryrun@users.noreply.github.com"
+
       - name: Fetch future inputs
         shell: bash
         run: |
@@ -58,9 +63,9 @@ jobs:
           for ref in $MERGES; do
             echo | tee -a "$report"
             echo "[merge $ref]" | tee -a "$report"
-            git merge --no-edit --no-ff "origin/$ref"
-            rc=$?
-            if [ "$rc" -ne 0 ]; then
+            if git merge --no-edit --no-ff "origin/$ref"; then
+              echo "OK $ref" | tee -a "$report"
+            else
               conflict=1
               echo "CONFLICT while merging $ref" | tee -a "$report"
               git diff --name-only --diff-filter=U | tee -a "$report"
@@ -68,26 +73,23 @@ jobs:
               git merge --abort || true
               break
             fi
-            echo "OK $ref" | tee -a "$report"
           done
 
           if [ "$conflict" -eq 0 ]; then
             echo | tee -a "$report"
             echo "[merge main]" | tee -a "$report"
-            git merge --no-edit --no-ff origin/main
-            rc=$?
-            if [ "$rc" -ne 0 ]; then
-              conflict=1
-              echo "CONFLICT while merging main" | tee -a "$report"
-              git diff --name-only --diff-filter=U | tee -a "$report"
-              git status --short | tee -a "$report"
-              git merge --abort || true
-            else
+            if git merge --no-edit --no-ff origin/main; then
               echo "OK main" | tee -a "$report"
               echo "candidate=$(git rev-parse HEAD)" | tee -a "$report"
               echo | tee -a "$report"
               echo "[FastLED/ArtNet changed paths vs current main]" | tee -a "$report"
               git diff --name-status origin/main...HEAD | grep -Ei 'fastled|artnet|art-net|vite.config|package.json|public/_headers' | tee -a "$report" || true
+            else
+              conflict=1
+              echo "CONFLICT while merging main" | tee -a "$report"
+              git diff --name-only --diff-filter=U | tee -a "$report"
+              git status --short | tee -a "$report"
+              git merge --abort || true
             fi
           fi
 
@@ -118,6 +120,8 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+          git config user.name "FastLED CI Dry Run"
+          git config user.email "fastled-dryrun@users.noreply.github.com"
           git fetch origin             main             feature/fastled-runtime             agent/fastled-cli-patch             agent/fastled-catalog             agent/fastled-matrix
           git merge --no-edit --no-ff origin/agent/fastled-cli-patch
           git merge --no-edit --no-ff origin/agent/fastled-catalog
