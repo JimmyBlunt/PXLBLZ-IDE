@@ -51,6 +51,22 @@ afterEach(() => {
 })
 
 describe('FastLED workspace', () => {
+  it('cancels initialization and disposes a late runtime without replacing the source', async () => {
+    const runtime = makeRuntime()
+    let finish!: (value: ReturnType<typeof makeRuntime>) => void
+    mocks.createRuntime.mockReturnValue(new Promise(resolve => { finish = resolve }))
+    render(<FastLedWorkspace onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Compile & run' }))
+    await waitFor(() => expect(mocks.createRuntime).toHaveBeenCalledOnce())
+    const signal = mocks.createRuntime.mock.calls[0][0].signal as AbortSignal
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(signal.aborted).toBe(true)
+    expect(screen.getByText('Cancelled.')).toBeInTheDocument()
+    await act(async () => finish(runtime))
+    expect(runtime.dispose).toHaveBeenCalledOnce()
+    expect(runtime.start).not.toHaveBeenCalled()
+    expect(screen.getByRole('textbox', { name: 'C++ source' })).toHaveValue('#include <FastLED.h>\nvoid loop() {}')
+  })
   it('renders the runtime RGB bytes through the existing renderer and controls playback', async () => {
     const runtime = makeRuntime()
     mocks.createRuntime.mockResolvedValue(runtime)

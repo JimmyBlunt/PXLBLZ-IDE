@@ -1,0 +1,271 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-10-01T23:23:57.038Z",
+  "target": "Official FastLED PC/WASM compiler, original examples and production frame adapter",
+  "upstreamFilesVerified": true,
+  "examples": [
+    {
+      "name": "Blink",
+      "inputs": [
+        {
+          "filename": "Blink.ino",
+          "bytes": 4788,
+          "sha256": "02433dd25612ad7d69a6962c2dd3409581cb91c9ae81e7c67d265cd76e05d6fc"
+        }
+      ],
+      "attempts": [
+        {
+          "status": 422,
+          "diagnosticsSha256": "5ea87d42b560717ffa23aab49900a35eda2c3496627ceaec90f43e602dbc3c6b",
+          "retryReason": "Exact upstream Rayon fingerprint traversal failure; one unchanged retry within the same deadline."
+        },
+        {
+          "status": 200,
+          "diagnosticsSha256": "78b105d33ee7939336829e80516e561c5106cb1c5ff0220a0239662ffe1a95d6"
+        }
+      ],
+      "status": "passed",
+      "artifactId": "90cd1e611cacebc7d2446070785ddab5507dfcec39eb197bbb40acdf41887a80",
+      "fastledVersion": "3.10.4",
+      "assets": [
+        {
+          "kind": "moduleUrl",
+          "filename": "module.mjs",
+          "bytes": 77737,
+          "sha256": "bf69897ff605bd3bba25eeb420582589ad47f95105789ccc5d08e74180ba539c"
+        },
+        {
+          "kind": "runtimeUrl",
+          "filename": "fastled.js",
+          "bytes": 77712,
+          "sha256": "f1c9a87568f508c7b384a272d4e3b6f2dfac568ef2a1123bf439deec34bc7ef4"
+        },
+        {
+          "kind": "wasmUrl",
+          "filename": "fastled.wasm",
+          "bytes": 196373,
+          "sha256": "90549a8928e2ed4e8cbc12724620f58e039716557caa1276a22a76c4a527a1eb"
+        }
+      ],
+      "elapsedMs": 125103,
+      "compilationNotes": []
+    },
+    {
+      "name": "ColorPalette",
+      "inputs": [
+        {
+          "filename": "ColorPalette.ino",
+          "bytes": 7463,
+          "sha256": "27ee180a70e329aff74047a1670aca5e18372c79ce50c0bc2a10f3bdbad9b943"
+        }
+      ],
+      "attempts": [
+        {
+          "status": 200,
+          "diagnosticsSha256": "4299efe5975dd38ce37af40f9f393d612832843d0a6bddf86de77ad7a8835b29"
+        }
+      ],
+      "status": "passed",
+      "artifactId": "941e5f137e211ad42c4e12ca12971b5d84f8032ab1fe45704f0a672c3536e983",
+      "fastledVersion": "3.10.4",
+      "assets": [
+        {
+          "kind": "moduleUrl",
+          "filename": "module.mjs",
+          "bytes": 77737,
+          "sha256": "2e9e6fb560a96bd44fe98c370bcb5c75221c67e973f079337233eabd1190e924"
+        },
+        {
+          "kind": "runtimeUrl",
+          "filename": "fastled.js",
+          "bytes": 77712,
+          "sha256": "a3e45d909eed565a4646bcb04bdb7e68d018e1c48ede96b5e520f414fc699f2b"
+        },
+        {
+          "kind": "wasmUrl",
+          "filename": "fastled.wasm",
+          "bytes": 200641,
+          "sha256": "5566b146dbf8485fe02a646ea1ceab1eec177148d88182fb0bd6f89acf981fc8"
+        }
+      ],
+      "elapsedMs": 15124,
+      "compilationNotes": [
+        "Used unchanged C++ header fallback after the upstream Arduino parser rejected the sketch. This path requires explicit forward declarations."
+      ]
+    },
+    {
+      "name": "Fire2012",
+      "inputs": [
+        {
+          "filename": "Fire2012.ino",
+          "bytes": 3594,
+          "sha256": "14eb8ece1707c8bd472d64df6b49d0b24e52cc42a20229f9172000535f858cec"
+        }
+      ],
+      "attempts": [
+        {
+          "status": 200,
+          "diagnosticsSha256": "c57298d0c1993e8ff8c6299c01a9232558f0f016a7264b01ce73664d366f1f4e"
+        }
+      ],
+      "status": "passed",
+      "artifactId": "2bf91b59bcc1e11dba6edc0bd0ad676eb7179ba4ccd2491feab48d6f6ed717f6",
+      "fastledVersion": "3.10.4",
+      "assets": [
+        {
+          "kind": "moduleUrl",
+          "filename": "module.mjs",
+          "bytes": 77737,
+          "sha256": "bf69897ff605bd3bba25eeb420582589ad47f95105789ccc5d08e74180ba539c"
+        },
+        {
+          "kind": "runtimeUrl",
+          "filename": "fastled.js",
+          "bytes": 77712,
+          "sha256": "f1c9a87568f508c7b384a272d4e3b6f2dfac568ef2a1123bf439deec34bc7ef4"
+        },
+        {
+          "kind": "wasmUrl",
+          "filename": "fastled.wasm",
+          "bytes": 196946,
+          "sha256": "b031ef39da63cd7b7fb3cb6df494f3925892a652b5f4e9e202afbd75d4520a7b"
+        }
+      ],
+      "elapsedMs": 8635,
+      "compilationNotes": []
+    },
+    {
+      "name": "DemoReel100",
+      "inputs": [
+        {
+          "filename": "DemoReel100.ino",
+          "bytes": 3781,
+          "sha256": "6296e7ba07d53fcd0fcd6c644843494b1b127870103bd0ff1a6e2798e0cdb6f1"
+        }
+      ],
+      "attempts": [
+        {
+          "status": 200,
+          "diagnosticsSha256": "f3d2b346befd6a7d03ea1a13b15f58c7789900b168781f378b27f8c73adf311f"
+        }
+      ],
+      "status": "passed",
+      "artifactId": "cba709295ca7d605f575c5d9effb37ebcb32567b3ace07e4d39ce7ef452a47ce",
+      "fastledVersion": "3.10.4",
+      "assets": [
+        {
+          "kind": "moduleUrl",
+          "filename": "module.mjs",
+          "bytes": 77737,
+          "sha256": "bf69897ff605bd3bba25eeb420582589ad47f95105789ccc5d08e74180ba539c"
+        },
+        {
+          "kind": "runtimeUrl",
+          "filename": "fastled.js",
+          "bytes": 77712,
+          "sha256": "f1c9a87568f508c7b384a272d4e3b6f2dfac568ef2a1123bf439deec34bc7ef4"
+        },
+        {
+          "kind": "wasmUrl",
+          "filename": "fastled.wasm",
+          "bytes": 202554,
+          "sha256": "abc57e343fb781db2906cfd6803c196185ecac50959882ea779876b832e672e1"
+        }
+      ],
+      "elapsedMs": 15869,
+      "compilationNotes": [
+        "Used unchanged C++ header fallback after the upstream Arduino parser rejected the sketch. This path requires explicit forward declarations."
+      ]
+    },
+    {
+      "name": "Noise",
+      "inputs": [
+        {
+          "filename": "Noise.ino",
+          "bytes": 3671,
+          "sha256": "4605a15ef0f330e9c5418e4297d79eadc507c004bedb6ce80c0aa148ebca04ca"
+        }
+      ],
+      "attempts": [
+        {
+          "status": 200,
+          "diagnosticsSha256": "a2dd7dae0f935c2ee89037e14224af4e00ea3c7c1b608dbd7df8949d29647b4a"
+        }
+      ],
+      "status": "passed",
+      "artifactId": "49c8c452852f6370e458e6089a105492df46412f7bed68a5553093fcfad04ea1",
+      "fastledVersion": "3.10.4",
+      "assets": [
+        {
+          "kind": "moduleUrl",
+          "filename": "module.mjs",
+          "bytes": 77737,
+          "sha256": "bf69897ff605bd3bba25eeb420582589ad47f95105789ccc5d08e74180ba539c"
+        },
+        {
+          "kind": "runtimeUrl",
+          "filename": "fastled.js",
+          "bytes": 77712,
+          "sha256": "f1c9a87568f508c7b384a272d4e3b6f2dfac568ef2a1123bf439deec34bc7ef4"
+        },
+        {
+          "kind": "wasmUrl",
+          "filename": "fastled.wasm",
+          "bytes": 197713,
+          "sha256": "aa14d5f0eb90bd9c3e2b8e650bbba805444a6e058d0d4a0c2b2ae8998ad43231"
+        }
+      ],
+      "elapsedMs": 16410,
+      "compilationNotes": []
+    },
+    {
+      "name": "NoisePlusPalette",
+      "inputs": [
+        {
+          "filename": "NoisePlusPalette.ino",
+          "bytes": 129,
+          "sha256": "520a12b417c8b74d17d675ac3a585d29f10fc3fbf582c87048aa93919b0c7185"
+        },
+        {
+          "filename": "NoisePlusPalette.h",
+          "bytes": 17563,
+          "sha256": "3330013e84328181c0e50e765b20917034de9af45bb62aeb0d9e3bd3ee8d24f9"
+        }
+      ],
+      "attempts": [
+        {
+          "status": 200,
+          "diagnosticsSha256": "285ef34a5874fcab9e4a038ed041830cb2a5c87665abdd1f059e7c6d9fb08d69"
+        }
+      ],
+      "status": "passed",
+      "artifactId": "fb1e0eaf88c3213b61747a2fe53b77fe6fbf983c972fed7dc936e218dfc28847",
+      "fastledVersion": "3.10.4",
+      "assets": [
+        {
+          "kind": "moduleUrl",
+          "filename": "module.mjs",
+          "bytes": 77737,
+          "sha256": "2e9e6fb560a96bd44fe98c370bcb5c75221c67e973f079337233eabd1190e924"
+        },
+        {
+          "kind": "runtimeUrl",
+          "filename": "fastled.js",
+          "bytes": 77712,
+          "sha256": "a3e45d909eed565a4646bcb04bdb7e68d018e1c48ede96b5e520f414fc699f2b"
+        },
+        {
+          "kind": "wasmUrl",
+          "filename": "fastled.wasm",
+          "bytes": 209661,
+          "sha256": "45c9bd0dfc9c47638ffb902db58adc7df85b11cc982c63c406758bae98f1fa61"
+        }
+      ],
+      "elapsedMs": 22244,
+      "compilationNotes": []
+    }
+  ],
+  "completedAt": "2026-10-01T23:27:21.018Z",
+  "passed": true,
+  "frameAdapterSha256": "5a119bb5e3b07cff0435580697a28370d78c6c9e8cf0190ad4435b7299bc8c10"
+}

@@ -79,7 +79,7 @@ test('failed compile preserves diagnostics and does not poison queue', async (t)
   await assert.rejects(compiler.compile('x'.repeat(1024 * 1024 + 1)), { status: 413 });
 });
 
-test('sketch configuration precedes the adapter and a wrong library version is refused', async (t) => {
+test('source defines are preserved before the adapter and a wrong library version is refused', async (t) => {
   const source = '#define FASTLED_SCALE8_FIXED 0\n#include <FastLED.h>\nvoid setup(){} void loop(){}';
   const { compiler, library } = await fixture(t, async (...args) => {
     const sketch = await readFile(join(args[1][0], 'Sketch.ino'), 'utf8');
@@ -111,7 +111,7 @@ test('multi-file sketches preserve source, share reordered keys, and rebuild mis
 });
 
 test('rejects sketch path traversal, reserved files, aliases, and aggregate size overflow', () => {
-  for (const name of ['../secret.h', 'dir/file.h', 'dir\\file.h', '..evil.h', 'pxlblz-frame-adapter.h', 'PXLBLZ-FRAME-ADAPTER.H', 'Sketch.ino', 'con.h', 'NUL.cpp']) {
+  for (const name of ['../secret.h', 'dir/file.h', 'dir\\file.h', '..evil.h', 'pxlblz-frame-adapter.h', 'PXLBLZ-FRAME-ADAPTER.H', 'pxlblz-sketch-source.h', 'PXLBLZ-SKETCH-SOURCE.H', 'Sketch.ino', 'con.h', 'NUL.cpp']) {
     assert.throws(() => validateSketchFiles('source', { [name]: 'text' }), { status: 400 });
   }
   assert.throws(() => validateSketchFiles('source', { 'Foo.h': '', 'foo.h': '' }), { status: 400 });
@@ -165,6 +165,58 @@ test('retries exactly once for the upstream parser deadline within the original 
     throw new CompileError('failed', 422, 'C++ parsing exceeded its cooperative deadline');
   });
   await assert.rejects(failing.compiler.compile('source'), { status: 422 });
+  assert.equal(attempts, 2);
+});
+
+test('macro syntax fallback preserves source bytes and lets the real compiler validate C++', async (t) => {
+  const source = '#define FASTLED_SCALE8_FIXED 0\r\nconst int value FL_PROGMEM = 3;\nvoid setup(){}\nvoid loop(){}';
+  let attempts = 0;
+  const budgets = [];
+  const { compiler } = await fixture(t, async (...args) => {
+    budgets.push(args[2].timeoutMs);
+    if (++attempts === 1) throw new CompileError('failed', 422, 'sketch has incomplete C++ syntax; retaining the last good IntelliSense prelude');
+    assert.equal(await readFile(join(args[1][0], 'pxlblz-sketch-source.h'), 'utf8'), '#line 1 "Sketch.ino"\n' + source + '\n');
+    assert.equal(await readFile(join(args[1][0], 'Sketch.ino'), 'utf8'), '#include "pxlblz-sketch-source.h"\n#include "pxlblz-frame-adapter.h"\n');
+    return fakeCompile(...args);
+  });
+  const result = await compiler.compile(source);
+  assert.equal(attempts, 2);
+  assert.ok(budgets[1] <= budgets[0]);
+  assert.match(result.diagnostics, /unchanged C\+\+ header fallback/);
+  let invalidAttempts = 0;
+  const invalid = await fixture(t, async () => {
+    if (++invalidAttempts === 1) throw new CompileError('failed', 422, 'sketch has incomplete C++ syntax; retaining the last good IntelliSense prelude');
+    throw new CompileError('failed', 422, 'clang: expected expression');
+  });
+  await assert.rejects(invalid.compiler.compile('invalid source'), (error) => error.status === 422 && error.diagnostics.includes('clang: expected expression'));
+  assert.equal(invalidAttempts, 2);
+  let genericAttempts = 0;
+  const generic = await fixture(t, async (...args) => {
+    genericAttempts++;
+    await assert.rejects(readFile(join(args[1][0], 'pxlblz-sketch-source.h')), { code: 'ENOENT' });
+    throw new CompileError('failed', 422, 'ordinary compile error');
+  });
+  await assert.rejects(generic.compiler.compile(source), { status: 422 });
+  assert.equal(genericAttempts, 1);
+});
+
+test('retries an exact upstream Rayon failure only once within the same time budget', async (t) => {
+  let attempts = 0;
+  const budgets = [];
+  const { compiler } = await fixture(t, async (...args) => {
+    budgets.push(args[2].timeoutMs);
+    if (++attempts === 1) throw new CompileError('failed', 422, 'rayon thread-pool too busy or dependency loop detected');
+    return fakeCompile(...args);
+  });
+  assert.match((await compiler.compile('source')).diagnostics, /Retried once after the upstream Rayon/);
+  assert.equal(attempts, 2);
+  assert.ok(budgets[1] <= budgets[0]);
+  attempts = 0;
+  const repeated = await fixture(t, async () => {
+    attempts++;
+    throw new CompileError('failed', 422, 'rayon thread-pool too busy or dependency loop detected');
+  });
+  await assert.rejects(repeated.compiler.compile('source'), { status: 422 });
   assert.equal(attempts, 2);
 });
 

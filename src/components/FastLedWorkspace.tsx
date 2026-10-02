@@ -326,6 +326,10 @@ export function FastLedWorkspace({ onClose }: { onClose: () => void }) {
             <button type="button" className="fastled-primary" disabled={status === 'compiling' || !source.trim()} onClick={() => void compile()}>
               {status === 'compiling' ? 'Compiling…' : 'Compile & run'}
             </button>
+            {status === 'compiling' && <button type="button" onClick={() => {
+              invalidate()
+              setDiagnostics('Cancelled.')
+            }}>Cancel</button>}
             <button type="button" disabled={!applied || status === 'error'} onClick={() => {
               if (status === 'running') { runtimeRef.current?.pause(); setStatus('paused') }
               else { runtimeRef.current?.start(); setStatus('running') }

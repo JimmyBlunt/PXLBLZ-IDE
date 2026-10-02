@@ -13,7 +13,7 @@ export function validateFastLedFilename(name: string): void {
   if (name.length > 128 || name.includes('..') || !/^[a-z0-9][a-z0-9_.-]*\.(?:h|hpp|cpp)$/i.test(name)
     || (/\.cpp$/i.test(name) && !name.endsWith('.cpp'))
     || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])\./i.test(name)
-    || name.toLowerCase() === 'pxlblz-frame-adapter.h') {
+    || ['pxlblz-frame-adapter.h', 'pxlblz-sketch-source.h'].includes(name.toLowerCase())) {
     throw new Error('Support files need a simple .h, .hpp or lowercase .cpp filename without folders or reserved names. This compiler does not compile .c or uppercase .CPP files.')
   }
 }

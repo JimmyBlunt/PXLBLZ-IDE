@@ -1,0 +1,70 @@
+{
+  "capturedAt": "2026-10-01T23:27:40.354Z",
+  "artifactId": "c7b825a4e8cc1b4323dda02bea72f006ab02b8094a86c378bc2757f94b47cbc6",
+  "commit": "01099b6f7d34e42486530d3d797eae8ecd4448af",
+  "expected": [
+    128,
+    64,
+    32,
+    8,
+    16,
+    120,
+    4,
+    101,
+    38
+  ],
+  "strips": [
+    {
+      "id": 0,
+      "bytes": [
+        128,
+        64,
+        32,
+        8,
+        16,
+        120
+      ]
+    },
+    {
+      "id": 1,
+      "bytes": [
+        4,
+        101,
+        38
+      ]
+    }
+  ],
+  "frames": [
+    [
+      128,
+      64,
+      32,
+      8,
+      16,
+      120,
+      4,
+      101,
+      38
+    ],
+    [
+      128,
+      64,
+      32,
+      8,
+      16,
+      120,
+      4,
+      101,
+      38
+    ]
+  ],
+  "errors": [],
+  "contract": "IDE RGB equals the original WASM visual buffer at brightness 128 and TypicalLEDStrip correction",
+  "passed": [
+    "multiple strips and stable order",
+    "upstream visual brightness/correction behavior",
+    "responsive UI during infinite C++ loop",
+    "reset blocked loop",
+    "abort blocked loop"
+  ]
+}

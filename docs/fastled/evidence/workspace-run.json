@@ -1,0 +1,110 @@
+{
+  "capturedAt": "2026-10-01T23:36:27.352Z",
+  "url": "http://127.0.0.1:5184/PXLBLZ-IDE/fastled",
+  "commit": "01099b6f7d34e42486530d3d797eae8ecd4448af",
+  "dirty": "M docs/fastled/compiler.md\n M docs/fastled/evidence/ui-test-startup.md\n M docs/fastled/evidence/workspace-running-blink.png\n M scripts/fastled/server.mjs\n M scripts/fastled/server.test.mjs\n M scripts/fastled/workspace-run-proof.mjs\n M src/components/FastLedWorkspace.test.tsx\n M src/components/FastLedWorkspace.tsx\n M src/engine/fastled/index.test.ts\n M src/engine/fastled/index.ts\n M src/engine/fastled/project.test.ts\n M src/engine/fastled/project.ts\n M src/engine/fastled/runtime.worker.ts",
+  "artifactId": "90cd1e611cacebc7d2446070785ddab5507dfcec39eb197bbb40acdf41887a80",
+  "fastledVersion": "3.10.4",
+  "errors": [],
+  "states": [
+    {
+      "status": "Ready to compile",
+      "diagnostics": "Choose an example or import a sketch. Download your source to keep this session.",
+      "filename": "Blink.inoC++ / Arduino",
+      "leds": "LED preview0 LEDs",
+      "at": 2517.7099999785423
+    },
+    {
+      "status": "Ready to compile",
+      "diagnostics": "Source changed. Compile to update the preview.",
+      "filename": "Blink.inoC++ / Arduino",
+      "leds": "LED preview0 LEDs",
+      "at": 12856.615000009537
+    },
+    {
+      "status": "Compiling",
+      "diagnostics": "Compiling the sketch with the local FastLED service…",
+      "filename": "Blink.inoC++ / Arduino",
+      "leds": "LED preview0 LEDs",
+      "at": 13008.115000009537
+    },
+    {
+      "status": "Compiling",
+      "diagnostics": "Link mode: static (sketch linked into fastled.wasm)\n[WASM] Build fingerprints computed (1.56s; FastLED 1.56s, toolchain 1.01s, parallel)\n[WASM] Library up-to-date\n[WASM] Compiling sketch: C:\\Users\\jimmy\\AppData\\Local\\Temp\\pxlblz-fastled-3.10.4\\work\\build-yvLtJO\\Sketch\\.build\\wasm\\Sketch_wrapper.cpp\n[WASM] Sketch compile published: d1223f85d253 (1.68s)\n[WASM] Linking final WASM module...\nwarning: user library symbol '$invokeEntryPoint' depends on internal symbol '$runtimeKeepaliveCounter'\nwarning: user library symbol '__pthread_create_js' depends on internal symbol '$pthreadCreateProxied'\nem++: warning: warnings in JS library compilation [-Wjs-compiler]\n\nCompilation successful!\n  Time: 14.27 seconds\n  Wall time: 14.41 seconds\n  Strategy: cold\n  Output: C:\\Users\\jimmy\\AppData\\Local\\Temp\\pxlblz-fastled-3.10.4\\work\\build-yvLtJO\\Sketch\\fastled_js\n",
+      "filename": "Blink.inoC++ / Arduino",
+      "leds": "LED preview0 LEDs",
+      "at": 13760.464999973774
+    },
+    {
+      "status": "Running",
+      "diagnostics": "Link mode: static (sketch linked into fastled.wasm)\n[WASM] Build fingerprints computed (1.56s; FastLED 1.56s, toolchain 1.01s, parallel)\n[WASM] Library up-to-date\n[WASM] Compiling sketch: C:\\Users\\jimmy\\AppData\\Local\\Temp\\pxlblz-fastled-3.10.4\\work\\build-yvLtJO\\Sketch\\.build\\wasm\\Sketch_wrapper.cpp\n[WASM] Sketch compile published: d1223f85d253 (1.68s)\n[WASM] Linking final WASM module...\nwarning: user library symbol '$invokeEntryPoint' depends on internal symbol '$runtimeKeepaliveCounter'\nwarning: user library symbol '__pthread_create_js' depends on internal symbol '$pthreadCreateProxied'\nem++: warning: warnings in JS library compilation [-Wjs-compiler]\n\nCompilation successful!\n  Time: 14.27 seconds\n  Wall time: 14.41 seconds\n  Strategy: cold\n  Output: C:\\Users\\jimmy\\AppData\\Local\\Temp\\pxlblz-fastled-3.10.4\\work\\build-yvLtJO\\Sketch\\fastled_js\n",
+      "filename": "Blink.inoC++ / Arduino",
+      "leds": "LED preview0 LEDs",
+      "at": 18744.819999992847
+    },
+    {
+      "status": "Running",
+      "diagnostics": "Link mode: static (sketch linked into fastled.wasm)\n[WASM] Build fingerprints computed (1.56s; FastLED 1.56s, toolchain 1.01s, parallel)\n[WASM] Library up-to-date\n[WASM] Compiling sketch: C:\\Users\\jimmy\\AppData\\Local\\Temp\\pxlblz-fastled-3.10.4\\work\\build-yvLtJO\\Sketch\\.build\\wasm\\Sketch_wrapper.cpp\n[WASM] Sketch compile published: d1223f85d253 (1.68s)\n[WASM] Linking final WASM module...\nwarning: user library symbol '$invokeEntryPoint' depends on internal symbol '$runtimeKeepaliveCounter'\nwarning: user library symbol '__pthread_create_js' depends on internal symbol '$pthreadCreateProxied'\nem++: warning: warnings in JS library compilation [-Wjs-compiler]\n\nCompilation successful!\n  Time: 14.27 seconds\n  Wall time: 14.41 seconds\n  Strategy: cold\n  Output: C:\\Users\\jimmy\\AppData\\Local\\Temp\\pxlblz-fastled-3.10.4\\work\\build-yvLtJO\\Sketch\\fastled_js\n",
+      "filename": "Blink.inoC++ / Arduino",
+      "leds": "LED preview1 LEDs",
+      "at": 22705.67500001192
+    },
+    {
+      "status": "Paused",
+      "diagnostics": "Link mode: static (sketch linked into fastled.wasm)\n[WASM] Build fingerprints computed (1.56s; FastLED 1.56s, toolchain 1.01s, parallel)\n[WASM] Library up-to-date\n[WASM] Compiling sketch: C:\\Users\\jimmy\\AppData\\Local\\Temp\\pxlblz-fastled-3.10.4\\work\\build-yvLtJO\\Sketch\\.build\\wasm\\Sketch_wrapper.cpp\n[WASM] Sketch compile published: d1223f85d253 (1.68s)\n[WASM] Linking final WASM module...\nwarning: user library symbol '$invokeEntryPoint' depends on internal symbol '$runtimeKeepaliveCounter'\nwarning: user library symbol '__pthread_create_js' depends on internal symbol '$pthreadCreateProxied'\nem++: warning: warnings in JS library compilation [-Wjs-compiler]\n\nCompilation successful!\n  Time: 14.27 seconds\n  Wall time: 14.41 seconds\n  Strategy: cold\n  Output: C:\\Users\\jimmy\\AppData\\Local\\Temp\\pxlblz-fastled-3.10.4\\work\\build-yvLtJO\\Sketch\\fastled_js\n",
+      "filename": "Blink.inoC++ / Arduino",
+      "leds": "LED preview1 LEDs",
+      "at": 22881.74500000477
+    },
+    {
+      "status": "Running",
+      "diagnostics": "Link mode: static (sketch linked into fastled.wasm)\n[WASM] Build fingerprints computed (1.56s; FastLED 1.56s, toolchain 1.01s, parallel)\n[WASM] Library up-to-date\n[WASM] Compiling sketch: C:\\Users\\jimmy\\AppData\\Local\\Temp\\pxlblz-fastled-3.10.4\\work\\build-yvLtJO\\Sketch\\.build\\wasm\\Sketch_wrapper.cpp\n[WASM] Sketch compile published: d1223f85d253 (1.68s)\n[WASM] Linking final WASM module...\nwarning: user library symbol '$invokeEntryPoint' depends on internal symbol '$runtimeKeepaliveCounter'\nwarning: user library symbol '__pthread_create_js' depends on internal symbol '$pthreadCreateProxied'\nem++: warning: warnings in JS library compilation [-Wjs-compiler]\n\nCompilation successful!\n  Time: 14.27 seconds\n  Wall time: 14.41 seconds\n  Strategy: cold\n  Output: C:\\Users\\jimmy\\AppData\\Local\\Temp\\pxlblz-fastled-3.10.4\\work\\build-yvLtJO\\Sketch\\fastled_js\n",
+      "filename": "Blink.inoC++ / Arduino",
+      "leds": "LED preview1 LEDs",
+      "at": 28610.75499999523
+    },
+    {
+      "status": "Ready to compile",
+      "diagnostics": "Source changed. Compile to update the preview.",
+      "filename": "Blink.inoC++ / Arduino",
+      "leds": "LED preview1 LEDs",
+      "at": 31066.94999998808
+    },
+    {
+      "status": "Ready to compile",
+      "diagnostics": "Source changed. Compile to update the preview.",
+      "filename": "Broken.inoC++ / Arduino",
+      "leds": "LED preview1 LEDs",
+      "at": 31183.694999992847
+    },
+    {
+      "status": "Compiling",
+      "diagnostics": "Compiling the sketch with the local FastLED service…",
+      "filename": "Broken.inoC++ / Arduino",
+      "leds": "LED preview1 LEDs",
+      "at": 31367.439999997616
+    },
+    {
+      "status": "Error",
+      "diagnostics": "Link mode: static (sketch linked into fastled.wasm)\n[WASM] Build fingerprints computed (29.67s; FastLED 29.67s, toolchain 23.88s, parallel)\n[WASM] Library up-to-date\n[WASM] Compiling sketch: C:\\Users\\jimmy\\AppData\\Local\\Temp\\pxlblz-fastled-3.10.4\\work\\build-PI9jlT\\Sketch\\.build\\wasm\\Sketch_wrapper.cpp\nSketch.ino:2:16: error: use of undeclared identifier 'missing_symbol'\n    2 | void setup() { missing_symbol(); }\n      |                ^~~~~~~~~~~~~~\n1 error generated.\n[WASM] Direct clang compile unavailable (clang++ sketch compile failed with exit code: 1); falling back to em++\nSketch.ino:2:16: error: use of undeclared identifier 'missing_symbol'\n    2 | void setup() { missing_symbol(); }\n      |                ^~~~~~~~~~~~~~\n1 error generated.\nNative Rust WASM build failed: em++ sketch compile fallback failed with exit code: 1\n\nCompilation failed.\n",
+      "filename": "Broken.inoC++ / Arduino",
+      "leds": "LED preview1 LEDs",
+      "at": 144885.82499998808
+    },
+    {
+      "status": "Ready to compile",
+      "diagnostics": "Source changed. Compile to update the preview.",
+      "filename": "Broken.ino · Not downloadedC++ / Arduino",
+      "leds": "LED preview1 LEDs",
+      "at": 147222.6549999714
+    }
+  ],
+  "passed": [
+    "real UI compile and run",
+    "one rendered LED",
+    "pause/run/reset controls",
+    "actual C++ diagnostic",
+    "discard refusal",
+    "full document return to non-isolated Gallery"
+  ]
+}

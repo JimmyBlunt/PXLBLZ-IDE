@@ -61,7 +61,19 @@ the compiler process tree. Compilation never requests interactive input.
 The upstream Arduino parser has a separate two-second cooperative deadline.
 When that exact deadline expires under build load, the service retries once
 with unchanged source and compiler arguments, within the original overall
-timeout. Syntax errors and other compiler failures are not retried.
+timeout. The exact upstream Rayon fingerprint traversal failure is likewise
+retried at most once within that same deadline. Other compiler failures are
+not retried unless they match the macro-parser fallback described below.
+
+The CLI's Arduino syntax parser can reject valid macro-rich C++, including
+the original ColorPalette and DemoReel100 examples. Only for its exact
+`sketch has incomplete C++ syntax` diagnostic, the bridge retries with the
+unchanged source inside the reserved `pxlblz-sketch-source.h` header and a tiny
+sketch that includes that header and the frame adapter. This lets the actual
+C++ compiler validate the source. The fallback does not generate forward
+declarations: functions used before definition must have explicit declarations,
+as these official examples already do. Invalid C++ still produces compiler
+errors. All retry paths share the original ten-minute limit.
 
 ## Runtime adapter
 
@@ -105,6 +117,12 @@ No supported separate-translation-unit sketch option was identified in this
 CLI revision. Matching MCU ABI, physical peripherals, and real-time hardware
 timing is outside the computer-rendering acceptance target.
 
+The official WASM preview capture deliberately removes LED color correction
+while retaining brightness before exposing RGB through `getStripPixelData`.
+The IDE displays those upstream preview bytes; they are not a measurement of
+the corrected electrical output sent to physical LEDs. See the pinned
+[`showPixels` capture path](https://github.com/FastLED/FastLED/blob/adedfc40e73fb80f8e930318781036d8fe1dbd9f/src/platforms/wasm/clockless_channel_wasm.h#L79).
+
 ## Focused verification
 
 ```powershell
@@ -116,3 +134,11 @@ compiler failure recovery, subprocess timeout, CORS/Host restrictions, request
 validation, artifact serving, and path isolation. They use a fake compiler;
 actual FastLED example compilation and pixel parity require the installed
 toolchain and are recorded separately in the validation report.
+
+With the service running and `FASTLED_PATH` set to the pinned checkout, run
+`node scripts/fastled/compile-examples.mjs` to compile all six original bundled
+examples through the production HTTP service. The script checks their bytes
+against upstream, downloads each actual runtime/WASM asset, and records source
+and artifact SHA-256 hashes in `production-compile-proof.json`. Each example
+has a twelve-minute client deadline. A remaining exact Rayon failure permits
+one unchanged HTTP retry within that deadline; the evidence records attempts.

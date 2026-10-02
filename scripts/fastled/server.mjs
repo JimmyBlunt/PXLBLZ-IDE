@@ -18,7 +18,8 @@ const SOURCE_LIMIT = 1024 * 1024;
 // Keep a separate transport bound; validateSketchFiles owns the decoded cap.
 const WIRE_LIMIT = 6 * SOURCE_LIMIT + 65536;
 const LOG_LIMIT = 128 * 1024;
-const BRIDGE_ABI = 'pxlblz-fastled-2';
+const BRIDGE_ABI = 'pxlblz-fastled-3';
+const SOURCE_HEADER = 'pxlblz-sketch-source.h';
 
 export function validateSketchFiles(source, files = {}) {
   if (typeof source !== 'string' || !source.trim()) throw new CompileError('source must be a non-empty string.', 400);
@@ -32,7 +33,7 @@ export function validateSketchFiles(source, files = {}) {
     if (/\.c$/i.test(name) || (/\.cpp$/i.test(name) && !name.endsWith('.cpp'))) {
       throw new CompileError(`Unsupported source extension: ${name}. The FastLED WASM compiler requires lowercase .cpp; standalone .c files are not compiled.`, 400);
     }
-    if (name.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9_.-]*\.(?:h|hpp|cpp)$/i.test(name) || name.includes('..') || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])\./i.test(name) || lower === 'pxlblz-frame-adapter.h' || names.has(lower)) {
+    if (name.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9_.-]*\.(?:h|hpp|cpp)$/i.test(name) || name.includes('..') || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])\./i.test(name) || lower === 'pxlblz-frame-adapter.h' || lower === SOURCE_HEADER || names.has(lower)) {
       throw new CompileError(`Unsupported or duplicate sketch filename: ${name}`, 400);
     }
     if (typeof contents !== 'string') throw new CompileError(`File ${name} must contain text.`, 400);
@@ -107,7 +108,7 @@ export function createCompiler(options = {}) {
     const [version, revision, dirty] = await Promise.all([
       compilerVersion,
       runCompiler('git', ['rev-parse', 'HEAD'], { cwd: fastledPath, timeoutMs: 30_000 }),
-      runCompiler('git', ['status', '--porcelain', '--untracked-files=all', '--', 'src', 'ci', 'library.properties', 'meson.build', 'meson_options.txt'], { cwd: fastledPath, timeoutMs: 30_000 }),
+      runCompiler('git', ['status', '--porcelain', '--untracked-files=all', '--', 'src', 'ci', 'library.properties', 'meson.build', 'meson.options', 'meson_options.txt'], { cwd: fastledPath, timeoutMs: 30_000 }),
     ]);
     if (dirty.trim()) throw new CompileError('FASTLED_PATH has modified compiler/library sources. Use a clean pinned checkout for reproducible builds.', 503);
     return version.trim() + '\0' + revision.trim();
@@ -143,22 +144,48 @@ export function createCompiler(options = {}) {
       try {
       const sketch = join(work, 'Sketch');
       await mkdir(sketch);
-      // Append after the sketch so its FASTLED_* preprocessor configuration
-      // remains effective before the first FastLED.h include.
+      // Preserve source order and append the observer after user declarations.
+      // Upstream's precompiled header unit owns library build configuration.
       await writeFile(join(sketch, 'Sketch.ino'), '#line 1 "Sketch.ino"\n' + source + '\n#include "pxlblz-frame-adapter.h"\n');
       await writeFile(join(sketch, 'pxlblz-frame-adapter.h'), adapter);
       for (const [name, contents] of sketchFiles) await writeFile(join(sketch, name), contents);
       const args = [sketch, '--just-compile', '--no-app', '--no-interactive', '--link', 'static', '--fastled-path', resolve(fastledPath)];
       const started = Date.now();
       let diagnostics;
-      try {
-        diagnostics = await run(command, args, { cwd: work, timeoutMs });
-      } catch (error) {
+      let retriedDeadline = false;
+      let retriedRayon = false;
+      let usedHeaderFallback = false;
+      const compileNotes = [];
+      for (;;) {
         const remaining = timeoutMs - (Date.now() - started);
-        if (!(error instanceof CompileError) || error.status !== 422 || !error.diagnostics.includes('C++ parsing exceeded its cooperative deadline') || remaining <= 0) throw error;
-        // Preserve all parser checks and the original deadline on one retry.
-        const retried = await run(command, args, { cwd: work, timeoutMs: remaining });
-        diagnostics = ('Retried once after the upstream Arduino parser deadline.\n' + retried).slice(-LOG_LIMIT);
+        if (remaining <= 0) throw new CompileError('FastLED compilation timed out.', 504);
+        try {
+          const output = await run(command, args, { cwd: work, timeoutMs: remaining });
+          diagnostics = [output, ...compileNotes].join('\n').slice(-LOG_LIMIT);
+          break;
+        } catch (error) {
+          if (!(error instanceof CompileError) || error.status !== 422) throw error;
+          if (!retriedDeadline && error.diagnostics.includes('C++ parsing exceeded its cooperative deadline')) {
+            retriedDeadline = true;
+            compileNotes.push('Retried once after the upstream Arduino parser deadline.');
+            continue;
+          }
+          if (!retriedRayon && error.diagnostics.includes('rayon thread-pool too busy or dependency loop detected')) {
+            retriedRayon = true;
+            compileNotes.push('Retried once after the upstream Rayon fingerprint traversal failure.');
+            continue;
+          }
+          if (!usedHeaderFallback && error.diagnostics.includes('sketch has incomplete C++ syntax; retaining the last good IntelliSense prelude')) {
+            // Tree-sitter can reject valid macro-rich C++. Keep source intact
+            // in a header and let the real C++ compiler validate it instead.
+            usedHeaderFallback = true;
+            await writeFile(join(sketch, SOURCE_HEADER), '#line 1 "Sketch.ino"\n' + source + '\n');
+            await writeFile(join(sketch, 'Sketch.ino'), `#include "${SOURCE_HEADER}"\n#include "pxlblz-frame-adapter.h"\n`);
+            compileNotes.push('Used unchanged C++ header fallback after the upstream Arduino parser rejected the sketch. This path requires explicit forward declarations.');
+            continue;
+          }
+          throw error;
+        }
       }
       const files = await filesUnder(work);
       const candidates = files.filter((file) => /(?:fastled|sketch)\.(?:js|mjs)$/i.test(basename(file)));

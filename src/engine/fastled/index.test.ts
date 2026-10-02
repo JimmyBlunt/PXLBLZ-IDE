@@ -46,6 +46,25 @@ class FakeWorker {
 }
 
 describe('FastLED worker ownership', () => {
+  it('allows long setup animations after module loading while retaining cancellation', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('Worker', FakeWorker)
+    FakeWorker.instances = []
+    const controller = new AbortController()
+    const onFrame = vi.fn(), onError = vi.fn()
+    const pending = createFastLedRuntime({ artifact, onFrame, onError, signal: controller.signal })
+    const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    const worker = FakeWorker.instances[0]
+    worker.send({ type: 'module-loaded' })
+    await vi.advanceTimersByTimeAsync(60000)
+    worker.send({ type: 'frame', frame: new Uint8Array([255, 0, 0]) })
+    expect(onFrame).toHaveBeenCalledOnce()
+    expect(worker.terminate).not.toHaveBeenCalled()
+    expect(onError).not.toHaveBeenCalled()
+    controller.abort()
+    await rejected
+    expect(worker.terminate).toHaveBeenCalled()
+  })
   it('samples the latest shared frame and isolates polling across pause, reset and stale errors', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('Worker', FakeWorker)

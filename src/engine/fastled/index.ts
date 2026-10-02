@@ -99,7 +99,9 @@ export async function createFastLedRuntime({ artifact, onFrame, onError, onLayou
     next.onerror = (event) => fail(event.message || 'FastLED worker failed.')
     next.onmessage = (event: MessageEvent<{ type: string; frame?: Uint8Array; positions?: [number, number][]; message?: string }>) => {
       if (disposed || current !== generation) return
-      if (event.data.type === 'ready') {
+      if (event.data.type === 'module-loaded') {
+        clearTimeout(timeout)
+      } else if (event.data.type === 'ready') {
         ready = true
         cancelLaunch = undefined
         clearTimeout(timeout)

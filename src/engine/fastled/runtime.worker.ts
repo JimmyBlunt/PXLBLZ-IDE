@@ -80,6 +80,9 @@ async function load(artifact: FastLedArtifact) {
     print: () => undefined,
     printErr: (message: string) => scope.postMessage({ type: 'log', message }),
   })
+  // User setup may intentionally animate for minutes. Only loading the module
+  // has a deadline; its execution remains cancellable by terminating this worker.
+  scope.postMessage({ type: 'module-loaded' })
   await module._extern_setup()
   sendFrame()
   scope.postMessage({ type: 'ready' })

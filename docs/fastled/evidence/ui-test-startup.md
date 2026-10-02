@@ -64,3 +64,26 @@ node node_modules/vitest/vitest.mjs run src/engine/fastled/project.test.ts --poo
 
 Focused ESLint on the workspace, project parser, their tests, and the explicit
 startup helper also exited 0.
+
+After adding cancellation for long-running sketch initialization and tightening
+support-file validation, the same explicit adapted-startup command passed
+**11 tests**, exit 0, on 2026-10-02. Vitest reported 116.79 seconds total:
+88.35 seconds environment setup, 17.00 seconds imports, 6.52 seconds setup,
+5.19 seconds transform, and 3.82 seconds test execution. This run includes the
+Cancel action, abort signal, and disposal of a runtime that resolves after
+cancellation. It remains an adapted-initialization run; assertion and test
+timeouts were unchanged.
+
+The run used base commit `01099b6f7d34e42486530d3d797eae8ecd4448af` plus the
+pending cancellation changes. The component and its tests remained unchanged
+during this run. Captured file hashes:
+
+| File | SHA-256 |
+| --- | --- |
+| `src/components/FastLedWorkspace.tsx` | `3913646105e9fea9763aa12c58fa57d48037b2274ee25d205dc226b72b0955a9` |
+| `src/components/FastLedWorkspace.test.tsx` | `d725ee8673f02b37e484da884a7baabc7c3771c05a8c8e69a3a5d9e44ad31891` |
+| `src/engine/fastled/project.ts` | `71434229ec4808a1b081d603ea53ea2c1a90808586b902c4130a3515a054d256` |
+| `src/engine/fastled/index.ts` | `2b91b968ca38ffc6a34e7145b84e612270392fae9c0a15e2618cd6e33bcb3ea5` |
+
+The UI suite mocks compilation and WASM execution. Its cancellation result is
+UI lifecycle evidence, not a substitute for the real browser runtime probes.
