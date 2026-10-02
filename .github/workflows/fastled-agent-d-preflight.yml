@@ -1,0 +1,143 @@
+name: FastLED Agent D review preflight
+
+on:
+  push:
+    branches:
+      - agent/fastled-review-prep
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diff-scope:
+    name: D scope · ${{ matrix.ref }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        ref:
+          - agent/fastled-cli-patch
+          - agent/fastled-catalog
+          - agent/fastled-matrix
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+          fetch-depth: 0
+      - name: Review changed-path scope against FastLED feature base
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin feature/fastled-runtime:refs/remotes/origin/feature/fastled-runtime
+          {
+            echo "ref=${{ matrix.ref }}"
+            echo "head=$(git rev-parse HEAD)"
+            echo
+            echo "[changed paths]"
+            git diff --name-status origin/feature/fastled-runtime...HEAD
+            echo
+            echo "[ArtNet-looking changed paths]"
+            git diff --name-only origin/feature/fastled-runtime...HEAD | grep -iE 'artnet|art-net' || true
+          } | tee d-scope-report.txt
+
+          if git diff --name-only origin/feature/fastled-runtime...HEAD | grep -qiE '(^|/)(artnet|art-net)(/|\.|$)'; then
+            echo "Unexpected ArtNet path touched by ${{ matrix.ref }}" >&2
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fastled-d-scope-${{ strategy.job-index }}
+          path: d-scope-report.txt
+
+  static-audit:
+    name: D static · ${{ matrix.ref }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        ref:
+          - feature/fastled-runtime
+          - agent/fastled-cli-patch
+          - agent/fastled-catalog
+          - agent/fastled-matrix
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+          fetch-depth: 0
+      - name: Static review report
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "ref=${{ matrix.ref }}"
+            echo "head=$(git rev-parse HEAD)"
+            echo
+            echo "[absolute local paths]"
+            git grep -nE '([A-Za-z]:\\\\Users\\\\|/Users/[^/]+/|/home/[^/]+/)' --               'src/**' 'scripts/fastled/**' 'test/fastled/**' 'docs/fastled/**' 'vendor/fastled-cli/**' || true
+            echo
+            echo "[ArtNet references inside FastLED-scoped files]"
+            git grep -niE 'artnet|art-net' --               'src/engine/fastled/**' 'scripts/fastled/**' 'test/fastled/**' 'docs/fastled/**' 'vendor/fastled-cli/**' || true
+            echo
+            echo "[broad compatibility wording candidates]"
+            git grep -niE 'all (arduino|boards|hardware)|universal compatibility|works on every|100% compatible' --               'src/engine/fastled/**' 'scripts/fastled/**' 'test/fastled/**' 'docs/fastled/**' || true
+            echo
+            echo "[provenance/license files]"
+            find src/engine/fastled test/fastled docs/fastled -maxdepth 5 -type f \
+              \( -iname '*license*' -o -iname '*provenance*' -o -iname '*manifest*' \) -print 2>/dev/null | sort || true
+          } | tee d-static-report.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fastled-d-static-${{ strategy.job-index }}
+          path: d-static-report.txt
+
+  regression-preflight:
+    name: D regression · ${{ matrix.ref }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        ref:
+          - feature/fastled-runtime
+          - agent/fastled-cli-patch
+          - agent/fastled-catalog
+          - agent/fastled-matrix
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Focused FastLED tests
+        run: npx vitest run src/engine/fastled
+      - name: Production build
+        run: npm run build
+
+  acceptance-map:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/fastled-runtime
+      - name: Verify review contract exists
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -s docs/fastled/acceptance.md
+          test -s docs/fastled/validation.md
+          test -s docs/fastled/parity.md
+          grep -F "Independent review" docs/fastled/validation.md
+          grep -F "Full repository regression" docs/fastled/validation.md
+          grep -F "Synchronize with current main" docs/fastled/validation.md
