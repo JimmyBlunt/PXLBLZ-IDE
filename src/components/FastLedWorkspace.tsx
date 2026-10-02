@@ -42,6 +42,8 @@ export function FastLedWorkspace({ onClose }: { onClose: () => void }) {
   const layoutModeRef = useRef(layoutMode)
   const sketchLayoutRef = useRef<[number, number][] | null>(null)
   const editorSource = selectedFile === null ? source : files[selectedFile] ?? ''
+  const isCatalogExample = Boolean(demoId)
+  const demoFolders = Array.from(new Set(FASTLED_DEMOS.map((demo) => demo.folder)))
 
   function layoutFrame() {
     const viewport = viewportRef.current
@@ -267,9 +269,17 @@ export function FastLedWorkspace({ onClose }: { onClose: () => void }) {
             setUnsaved(false)
           }}>
             <option value="" disabled>Custom sketch</option>
-            {FASTLED_DEMOS.map((demo) => <option key={demo.id} value={demo.id}>{demo.name}</option>)}
+            {demoFolders.map((folder) => <optgroup key={folder} label={folder}>
+              {FASTLED_DEMOS.filter((demo) => demo.folder === folder)
+                .map((demo) => <option key={demo.id} value={demo.id}>{demo.name}</option>)}
+            </optgroup>)}
           </select>
         </label>
+        <button type="button" disabled={!isCatalogExample} onClick={() => {
+          setDemoId('')
+          setUnsaved(true)
+          setDiagnostics('Copied official example into an editable sketch.')
+        }}>Copy to editable sketch</button>
         <button type="button" onClick={() => fileRef.current?.click()}>Import source file</button>
         <button type="button" onClick={download}>Download .ino{Object.keys(files).length > 0 ? ' only' : ''}</button>
         <button type="button" onClick={() => projectFileRef.current?.click()}>Import project</button>
@@ -318,7 +328,8 @@ export function FastLedWorkspace({ onClose }: { onClose: () => void }) {
               else { invalidate(); setFiles({ ...files, [selectedFile]: value }) }
               setUnsaved(true)
             }}
-            options={{ automaticLayout: true, minimap: { enabled: false }, fontSize: 13, tabSize: 2, scrollBeyondLastLine: false }} />
+            options={{ automaticLayout: true, minimap: { enabled: false }, fontSize: 13, tabSize: 2,
+              scrollBeyondLastLine: false, readOnly: isCatalogExample }} />
         </div>
         <div className="fastled-preview">
           <div className="fastled-pane-heading"><span>LED preview</span><span>{pixelCount.toLocaleString()} LEDs</span></div>
