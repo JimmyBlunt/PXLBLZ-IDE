@@ -20,7 +20,7 @@ const thresholds = Object.freeze({
   mainThreadMaxGapMs: 250,
 });
 
-const cases = [
+const allCases = [
   {
     name: 'Animartrix',
     source: 'test/fastled/matrix/upstream/Animartrix.ino',
@@ -51,6 +51,14 @@ const cases = [
   },
 ];
 
+const requestedCase = process.env.FASTLED_MATRIX_CASE?.trim();
+const cases = requestedCase
+  ? allCases.filter(testCase => testCase.name === requestedCase)
+  : allCases;
+if (requestedCase && cases.length !== 1) {
+  throw new Error(`Unknown FASTLED_MATRIX_CASE "${requestedCase}". Expected one of: ${allCases.map(item => item.name).join(', ')}`);
+}
+
 async function compile(name, source) {
   const started = performance.now();
   const response = await fetch(new URL('/compile', endpoint), {
@@ -79,6 +87,7 @@ const evidence = {
   compilerEndpoint: endpoint.origin,
   ideUrl,
   thresholds,
+  requestedCase: requestedCase || null,
   cases: [],
 };
 
