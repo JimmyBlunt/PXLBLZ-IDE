@@ -1,0 +1,148 @@
+name: FastLED future main-sync reconnaissance
+
+on:
+  push:
+    branches:
+      - agent/fastled-main-sync-dryrun
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync-map:
+    name: Sync map · ${{ matrix.scenario }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        include:
+          - scenario: core-feature
+            merges: ""
+          - scenario: with-agent-a
+            merges: "agent/fastled-cli-patch"
+          - scenario: with-agent-c
+            merges: "agent/fastled-catalog"
+          - scenario: with-agent-b
+            merges: "agent/fastled-matrix"
+          - scenario: combined-a-c-b
+            merges: "agent/fastled-cli-patch agent/fastled-catalog agent/fastled-matrix"
+    env:
+      MERGES: ${{ matrix.merges }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/fastled-runtime
+          fetch-depth: 0
+
+      - name: Fetch future inputs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git fetch origin             main             feature/fastled-runtime             agent/fastled-cli-patch             agent/fastled-catalog             agent/fastled-matrix
+
+      - name: Simulate merges without pushing
+        shell: bash
+        run: |
+          set -u
+          report="sync-${{ matrix.scenario }}.txt"
+          : > "$report"
+          echo "scenario=${{ matrix.scenario }}" | tee -a "$report"
+          echo "feature=$(git rev-parse HEAD)" | tee -a "$report"
+          echo "main=$(git rev-parse origin/main)" | tee -a "$report"
+          echo "planned_merges=$MERGES" | tee -a "$report"
+
+          conflict=0
+          for ref in $MERGES; do
+            echo | tee -a "$report"
+            echo "[merge $ref]" | tee -a "$report"
+            git merge --no-edit --no-ff "origin/$ref"
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+              conflict=1
+              echo "CONFLICT while merging $ref" | tee -a "$report"
+              git diff --name-only --diff-filter=U | tee -a "$report"
+              git status --short | tee -a "$report"
+              git merge --abort || true
+              break
+            fi
+            echo "OK $ref" | tee -a "$report"
+          done
+
+          if [ "$conflict" -eq 0 ]; then
+            echo | tee -a "$report"
+            echo "[merge main]" | tee -a "$report"
+            git merge --no-edit --no-ff origin/main
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+              conflict=1
+              echo "CONFLICT while merging main" | tee -a "$report"
+              git diff --name-only --diff-filter=U | tee -a "$report"
+              git status --short | tee -a "$report"
+              git merge --abort || true
+            else
+              echo "OK main" | tee -a "$report"
+              echo "candidate=$(git rev-parse HEAD)" | tee -a "$report"
+              echo | tee -a "$report"
+              echo "[FastLED/ArtNet changed paths vs current main]" | tee -a "$report"
+              git diff --name-status origin/main...HEAD | grep -Ei 'fastled|artnet|art-net|vite.config|package.json|public/_headers' | tee -a "$report" || true
+            fi
+          fi
+
+          echo "conflict=$conflict" | tee -a "$report"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fastled-main-sync-${{ matrix.scenario }}
+          path: sync-${{ matrix.scenario }}.txt
+
+  combined-preflight:
+    name: Combined future candidate · tests/build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/fastled-runtime
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Build virtual future candidate
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git fetch origin             main             feature/fastled-runtime             agent/fastled-cli-patch             agent/fastled-catalog             agent/fastled-matrix
+          git merge --no-edit --no-ff origin/agent/fastled-cli-patch
+          git merge --no-edit --no-ff origin/agent/fastled-catalog
+          git merge --no-edit --no-ff origin/agent/fastled-matrix
+          git merge --no-edit --no-ff origin/main
+          {
+            echo "virtual_candidate=$(git rev-parse HEAD)"
+            echo "main=$(git rev-parse origin/main)"
+            echo "feature_base=$(git rev-parse origin/feature/fastled-runtime)"
+          } | tee future-candidate.txt
+
+      - run: npm ci
+
+      - name: Focused FastLED regression on virtual merged tree
+        run: npx vitest run src/engine/fastled src/components/FastLedWorkspace.test.tsx
+
+      - name: TypeScript / production build on virtual merged tree
+        run: npm run build
+
+      - name: Lint FastLED product paths on virtual merged tree
+        run: npx eslint src/engine/fastled src/components/FastLedWorkspace.tsx src/components/FastLedWorkspace.test.tsx
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fastled-future-candidate-preflight
+          if-no-files-found: warn
+          path: future-candidate.txt
