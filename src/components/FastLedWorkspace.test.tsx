@@ -11,8 +11,9 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@monaco-editor/react', () => ({
-  default: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
-    <textarea aria-label="C++ source" value={value} onChange={(event) => onChange(event.target.value)} />
+  default: ({ value, onChange, options }: { value: string; onChange: (value: string) => void; options?: { readOnly?: boolean } }) => (
+    <textarea aria-label="C++ source" data-readonly={String(Boolean(options?.readOnly))}
+      value={value} onChange={(event) => onChange(event.target.value)} />
   ),
 }))
 vi.mock('@/engine/renderer', () => ({
@@ -22,8 +23,9 @@ vi.mock('@/engine/fastled', () => ({
   compileFastLed: mocks.compile,
   createFastLedRuntime: mocks.createRuntime,
   FASTLED_DEMOS: [
-    { id: 'Blink', name: 'Blink', source: '#include <FastLED.h>\nvoid loop() {}' },
-    { id: 'Noise', name: 'Noise', source: '#include "Noise.h"', files: { 'Noise.h': 'void setup() {} void loop() {}' } },
+    { id: 'Blink', name: 'Blink', folder: 'Standard examples', source: '#include <FastLED.h>\nvoid loop() {}' },
+    { id: 'Noise', name: 'Noise', folder: 'Standard examples', source: '#include "Noise.h"', files: { 'Noise.h': 'void setup() {} void loop() {}' } },
+    { id: 'Animartrix', name: 'Animartrix', folder: 'Matrix & geometry', source: '#include <FastLED.h>\nvoid loop() { FastLED.show(); }' },
   ],
 }))
 
@@ -51,6 +53,22 @@ afterEach(() => {
 })
 
 describe('FastLED workspace', () => {
+  it('groups official examples and requires an explicit editable copy', () => {
+    render(<FastLedWorkspace onClose={vi.fn()} />)
+    const selector = screen.getByRole('combobox', { name: 'Official example' })
+    expect(screen.getByRole('group', { name: 'Standard examples' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Matrix & geometry' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'C++ source' })).toHaveAttribute('data-readonly', 'true')
+
+    fireEvent.change(selector, { target: { value: 'Animartrix' } })
+    expect(screen.getByRole('textbox', { name: 'C++ source' })).toHaveValue('#include <FastLED.h>\nvoid loop() { FastLED.show(); }')
+    expect(screen.getByRole('textbox', { name: 'C++ source' })).toHaveAttribute('data-readonly', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy to editable sketch' }))
+    expect(screen.getByRole('textbox', { name: 'C++ source' })).toHaveAttribute('data-readonly', 'false')
+    expect(screen.getByText('Copied official example into an editable sketch.')).toBeInTheDocument()
+  })
+
   it('cancels initialization and disposes a late runtime without replacing the source', async () => {
     const runtime = makeRuntime()
     let finish!: (value: ReturnType<typeof makeRuntime>) => void
