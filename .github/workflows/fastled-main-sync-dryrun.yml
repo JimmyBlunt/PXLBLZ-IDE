@@ -126,12 +126,27 @@ jobs:
           git merge --no-edit --no-ff origin/agent/fastled-cli-patch
           git merge --no-edit --no-ff origin/agent/fastled-catalog
           git merge --no-edit --no-ff origin/agent/fastled-matrix
-          git merge --no-edit --no-ff origin/main
+
+          if git merge --no-edit --no-ff origin/main; then
+            echo "main merge was clean" | tee future-candidate.txt
+          else
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            printf 'main merge conflicts:\n%s\n' "$conflicts" | tee future-candidate.txt
+            test "$conflicts" = "vite.config.ts"
+            git checkout --theirs vite.config.ts
+            node scripts/fastled/resolve-main-vite.mjs
+            git add vite.config.ts
+            git commit --no-edit
+            echo "resolved expected vite.config.ts conflict" | tee -a future-candidate.txt
+          fi
+
           {
             echo "virtual_candidate=$(git rev-parse HEAD)"
             echo "main=$(git rev-parse origin/main)"
             echo "feature_base=$(git rev-parse origin/feature/fastled-runtime)"
-          } | tee future-candidate.txt
+            echo "merge_base=$(git merge-base origin/main HEAD)"
+          } | tee -a future-candidate.txt
+          git merge-base --is-ancestor origin/main HEAD
 
       - run: npm ci
 
