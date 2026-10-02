@@ -6,6 +6,10 @@ on:
       - agent/fastled-main-sync-builder
   workflow_dispatch:
 
+concurrency:
+  group: fastled-main-candidate-builder
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -62,11 +66,11 @@ jobs:
       - name: FastLED lint
         run: npx eslint src/engine/fastled src/components/FastLedWorkspace.tsx src/components/FastLedWorkspace.test.tsx
 
-      - name: Publish isolated main-synced candidate
+      - name: Record publication readiness
         shell: bash
         run: |
           set -euxo pipefail
-          git push --force origin HEAD:refs/heads/agent/fastled-main-candidate
+          echo "Candidate tree is technically prepared. Publication is intentionally deferred until the repository exact-range review and runner-evidence gates are satisfied." | tee -a main-candidate-identity.txt
 
       - uses: actions/upload-artifact@v4
         if: always()
