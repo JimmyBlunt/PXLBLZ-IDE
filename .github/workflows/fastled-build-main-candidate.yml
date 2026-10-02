@@ -1,0 +1,76 @@
+name: Build FastLED main-synced candidate
+
+on:
+  push:
+    branches:
+      - agent/fastled-main-sync-builder
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fastled-integration-candidate
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Merge current main with deterministic conflict resolution
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git config user.name "FastLED Candidate Builder"
+          git config user.email "fastled-candidate@users.noreply.github.com"
+          git fetch origin main agent/fastled-integration-candidate agent/fastled-main-sync-builder
+          if git merge --no-edit --no-ff origin/main; then
+            echo "Current main merged cleanly."
+          else
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            printf 'Conflicts:\n%s\n' "$conflicts"
+            test "$conflicts" = "vite.config.ts"
+            git checkout --theirs vite.config.ts
+            git show origin/agent/fastled-main-sync-builder:scripts/fastled/resolve-current-main-vite.mjs > /tmp/resolve-current-main-vite.mjs
+            node /tmp/resolve-current-main-vite.mjs
+            git add vite.config.ts
+            git commit --no-edit
+          fi
+          git merge-base --is-ancestor origin/main HEAD
+          {
+            echo "candidate=$(git rev-parse HEAD)"
+            echo "main=$(git rev-parse origin/main)"
+            echo "integration=$(git rev-parse origin/agent/fastled-integration-candidate)"
+          } | tee main-candidate-identity.txt
+
+      - run: npm ci
+
+      - name: Focused combined FastLED tests
+        run: npx vitest run src/engine/fastled src/components/FastLedWorkspace.test.tsx
+
+      - name: Production build
+        run: npm run build
+
+      - name: FastLED lint
+        run: npx eslint src/engine/fastled src/components/FastLedWorkspace.tsx src/components/FastLedWorkspace.test.tsx
+
+      - name: Publish isolated main-synced candidate
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git push --force origin HEAD:refs/heads/agent/fastled-main-candidate
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fastled-main-candidate-identity
+          if-no-files-found: warn
+          path: main-candidate-identity.txt
