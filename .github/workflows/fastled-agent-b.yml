@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   example:
-    name: Agent B · \${{ matrix.example }}
+    name: Agent B · ${{ matrix.example }}
     runs-on: ubuntu-24.04
     timeout-minutes: 65
     strategy:
@@ -31,11 +31,11 @@ jobs:
           - Animartrix
           - WasmScreenCoords
     env:
-      FASTLED_MATRIX_CASE: \${{ matrix.example }}
+      FASTLED_MATRIX_CASE: ${{ matrix.example }}
       FASTLED_CLI_COMMIT: bb1d619c1d64194198f9c68ac852fc79e6a01d9e
       FASTLED_COMMIT: adedfc40e73fb80f8e930318781036d8fe1dbd9f
-      FASTLED_PATH: \${{ github.workspace }}/FastLED-3.10.4
-      FASTLED_CLI: \${{ github.workspace }}/fastled-cli/target/release/fastled
+      FASTLED_PATH: ${{ github.workspace }}/FastLED-3.10.4
+      FASTLED_CLI: ${{ github.workspace }}/fastled-cli/target/release/fastled
       UV_PYTHON: "3.12"
       FASTLED_PYTHON_EXECUTABLE: "python3"
       FASTLED_COMPILER_URL: http://127.0.0.1:9982
@@ -61,14 +61,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: FastLED/cli
-          ref: \${{ env.FASTLED_CLI_COMMIT }}
+          ref: ${{ env.FASTLED_CLI_COMMIT }}
           path: fastled-cli
 
       - name: Checkout pinned FastLED 3.10.4
         uses: actions/checkout@v4
         with:
           repository: FastLED/FastLED
-          ref: \${{ env.FASTLED_COMMIT }}
+          ref: ${{ env.FASTLED_COMMIT }}
           path: FastLED-3.10.4
 
       - name: Set up Rust
@@ -96,49 +96,49 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cargo build --manifest-path fastled-cli/Cargo.toml -p fastled-cli --no-default-features --release 2>&1 | tee "agent-b-\${FASTLED_MATRIX_CASE}-cargo.log"
-          "$FASTLED_CLI" --version | tee "agent-b-\${FASTLED_MATRIX_CASE}-cli-version.txt"
+          cargo build --manifest-path fastled-cli/Cargo.toml -p fastled-cli --no-default-features --release 2>&1 | tee "agent-b-${FASTLED_MATRIX_CASE}-cargo.log"
+          "$FASTLED_CLI" --version | tee "agent-b-${FASTLED_MATRIX_CASE}-cli-version.txt"
 
       - name: Start production compiler service
         shell: bash
         run: |
           set -euxo pipefail
-          node scripts/fastled/server.mjs >"agent-b-\${FASTLED_MATRIX_CASE}-server.log" 2>&1 &
+          node scripts/fastled/server.mjs >"agent-b-${FASTLED_MATRIX_CASE}-server.log" 2>&1 &
           for i in $(seq 1 120); do
-            if curl --fail --silent http://127.0.0.1:9982/health >"agent-b-\${FASTLED_MATRIX_CASE}-health.json"; then
-              cat "agent-b-\${FASTLED_MATRIX_CASE}-health.json"
+            if curl --fail --silent http://127.0.0.1:9982/health >"agent-b-${FASTLED_MATRIX_CASE}-health.json"; then
+              cat "agent-b-${FASTLED_MATRIX_CASE}-health.json"
               exit 0
             fi
             sleep 1
           done
-          cat "agent-b-\${FASTLED_MATRIX_CASE}-server.log"
+          cat "agent-b-${FASTLED_MATRIX_CASE}-server.log"
           exit 1
 
       - name: Start isolated Vite IDE
         shell: bash
         run: |
           set -euxo pipefail
-          npm run dev -- --host 127.0.0.1 --port 5184 >"agent-b-\${FASTLED_MATRIX_CASE}-vite.log" 2>&1 &
+          npm run dev -- --host 127.0.0.1 --port 5184 >"agent-b-${FASTLED_MATRIX_CASE}-vite.log" 2>&1 &
           for i in $(seq 1 120); do
             if curl --fail --silent http://127.0.0.1:5184/PXLBLZ-IDE/fastled >/dev/null; then
               exit 0
             fi
             sleep 1
           done
-          cat "agent-b-\${FASTLED_MATRIX_CASE}-vite.log"
+          cat "agent-b-${FASTLED_MATRIX_CASE}-vite.log"
           exit 1
 
       - name: Run independent matrix example proof
         shell: bash
         run: |
           set -euxo pipefail
-          node scripts/fastled/matrix-proof.mjs "agent-b-\${FASTLED_MATRIX_CASE}-evidence.json" 2>&1 | tee "agent-b-\${FASTLED_MATRIX_CASE}-proof.log"
+          node scripts/fastled/matrix-proof.mjs "agent-b-${FASTLED_MATRIX_CASE}-evidence.json" 2>&1 | tee "agent-b-${FASTLED_MATRIX_CASE}-proof.log"
 
       - name: Upload example evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: fastled-agent-b-\${{ matrix.example }}
+          name: fastled-agent-b-${{ matrix.example }}
           if-no-files-found: warn
           path: |
-            agent-b-\${{ matrix.example }}-*
+            agent-b-${{ matrix.example }}-*
