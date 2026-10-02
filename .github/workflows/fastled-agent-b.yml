@@ -15,6 +15,10 @@ on:
       - "package-lock.json"
   workflow_dispatch:
 
+concurrency:
+  group: fastled-agent-b-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
