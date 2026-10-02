@@ -24,7 +24,7 @@ diff --git a/crates/fastled-cli/src/sketch_preprocessor.rs b/crates/fastled-cli/
 index 9296083..6b8725b 100644
 --- a/crates/fastled-cli/src/sketch_preprocessor.rs
 +++ b/crates/fastled-cli/src/sketch_preprocessor.rs
-@@ -404,23 +404,50 @@ fn preprocess(
+@@ -404,23 +404,45 @@ fn preprocess(
          .join("\n");
      let (prototypes, prototype_offset) = analyze_function_prototypes(&combined)?;
      let prototype_declarations = render_prototype_declarations(&prototypes);
@@ -76,7 +76,7 @@ index 9296083..6b8725b 100644
      }
  
      Ok(PreprocessedSketch {
-@@ -518,10 +545,18 @@ fn render_prototype_declarations(prototypes: &[String]) -> String {
+@@ -518,11 +545,19 @@ fn render_prototype_declarations(prototypes: &[String]) -> String {
  
  /// Select Arduino prototypes from kernel-owned C++ syntax analysis.
 -fn extract_function_prototypes(source: &str) -> Result<Vec<String>> {
@@ -108,7 +108,7 @@ index 9296083..6b8725b 100644
 +    let (prototypes, _) = analyze_function_prototypes(source)?;
 +    Ok(prototypes)
  }
-@@ -857,4 +897,43 @@ mod tests {
+@@ -857,4 +897,44 @@ mod tests {
              ["void helper()", "void second()"]
          );
      }
