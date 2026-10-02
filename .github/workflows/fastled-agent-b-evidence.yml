@@ -1,0 +1,85 @@
+name: FastLED Agent B evidence preflight
+
+on:
+  push:
+    branches:
+      - agent/fastled-matrix-evidence
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  provenance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FASTLED_COMMIT: adedfc40e73fb80f8e930318781036d8fe1dbd9f
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: FastLED/FastLED
+          ref: ${{ env.FASTLED_COMMIT }}
+          path: upstream-fastled
+      - name: Verify exact upstream matrix sources and license
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmp test/fastled/matrix/upstream/Animartrix.ino upstream-fastled/examples/Animartrix/Animartrix.ino
+          cmp test/fastled/matrix/upstream/WasmScreenCoords.ino upstream-fastled/examples/WasmScreenCoords/WasmScreenCoords.ino
+          test "$(git -C upstream-fastled hash-object examples/Animartrix/Animartrix.ino)" = "1358c7a6035298b8abe2bcf926d048e5eff8362a"
+          test "$(git -C upstream-fastled hash-object examples/WasmScreenCoords/WasmScreenCoords.ino)" = "f507157fe626989d8a6d476c816e2dd387f9893a"
+          test -s src/engine/fastled/examples/LICENSE.FastLED
+          sha256sum             test/fastled/matrix/upstream/Animartrix.ino             test/fastled/matrix/upstream/WasmScreenCoords.ino             src/engine/fastled/examples/LICENSE.FastLED             > agent-b-provenance.sha256
+          cat agent-b-provenance.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fastled-agent-b-provenance
+          path: agent-b-provenance.sha256
+
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Validate proof script and capture runner metadata
+        shell: bash
+        run: |
+          set -euxo pipefail
+          node --check scripts/fastled/matrix-proof.mjs
+          grep -F "FASTLED_MATRIX_CASE" scripts/fastled/matrix-proof.mjs
+          grep -F "coldCompileMsMax" scripts/fastled/matrix-proof.mjs
+          grep -F "warmCompileMsMax" scripts/fastled/matrix-proof.mjs
+          grep -F "steadyStateFpsMin" scripts/fastled/matrix-proof.mjs
+          {
+            echo "node=$(node --version)"
+            echo "npm=$(npm --version)"
+            echo "os=$(uname -a)"
+            echo "cpu=$(lscpu | grep 'Model name' | head -1 | sed 's/^[[:space:]]*//')"
+            echo "playwright=$(node -p \"require('@playwright/test/package.json').version\")"
+          } | tee agent-b-runner-metadata.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fastled-agent-b-runner-metadata
+          path: agent-b-runner-metadata.txt
+
+  integration-preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Focused FastLED tests
+        run: npx vitest run src/engine/fastled
+      - name: Production build
+        run: npm run build
