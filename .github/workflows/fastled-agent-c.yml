@@ -1,0 +1,31 @@
+name: FastLED catalog proof
+
+on:
+  push:
+    branches:
+      - agent/fastled-catalog
+  pull_request:
+    branches:
+      - feature/fastled-runtime
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  catalog:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: FastLED catalog and workspace tests
+        run: npx vitest run src/components/FastLedWorkspace.test.tsx src/engine/fastled
+      - name: Lint changed FastLED UI
+        run: npx eslint src/components/FastLedWorkspace.tsx src/components/FastLedWorkspace.test.tsx src/engine/fastled/examples.ts src/engine/fastled/examples/manifest.ts
+      - name: TypeScript and production build
+        run: npm run build
