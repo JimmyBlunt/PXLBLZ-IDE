@@ -11,7 +11,7 @@ export const FASTLED_EXAMPLE_MANIFEST = {
       entries: [
         { id: 'Blink', title: 'Blink', sourceFiles: ['Blink.ino'], dimension: { kind: 'strip', pixels: 1 } },
         { id: 'DemoReel100', title: 'DemoReel100', sourceFiles: ['DemoReel100.ino'], dimension: { kind: 'strip', pixels: 64 } },
-        { id: 'ColorPalette', title: 'ColorPalette', sourceFiles: ['ColorPalette.ino'], dimension: { kind: 'strip', pixels: 16 } },
+        { id: 'ColorPalette', title: 'ColorPalette', sourceFiles: ['ColorPalette.ino'], dimension: { kind: 'strip', pixels: 50 } },
         { id: 'Fire2012', title: 'Fire2012', sourceFiles: ['Fire2012.ino'], dimension: { kind: 'strip', pixels: 30 } },
         { id: 'Noise', title: 'Noise', sourceFiles: ['Noise.ino'], dimension: { kind: 'matrix', width: 16, height: 16, pixels: 256 } },
         { id: 'NoisePlusPalette', title: 'NoisePlusPalette', sourceFiles: ['NoisePlusPalette.ino', 'NoisePlusPalette.h'], dimension: { kind: 'matrix', width: 16, height: 16, pixels: 256 } },
