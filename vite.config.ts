@@ -10,10 +10,13 @@ import path from 'path'
 import fs from 'fs'
 import { execFileSync } from 'child_process'
 import { assertVitestProjectIdentity } from './scripts/vitest-project-identity.js'
+import { readWorkerCount } from './scripts/worker-count-env.js'
 import { fastLedIsolationHeaders } from './src/engine/fastled/isolation'
 
 const DEFAULT_BASE = '/PXLBLZ-IDE/'
 const DEFAULT_API_PROXY_TARGET = 'http://localhost:8788'
+const vitestWorkerName = 'WRSP_HOST_VITEST_WORKERS'
+const vitestWorkerCount = readWorkerCount(process.env, vitestWorkerName, 4)
 // A project-level exclude replaces Vitest's defaults. Preserve those defaults,
 // then reject nested tool worktrees before their source or dependencies leak in.
 const TEST_DISCOVERY_EXCLUDES = [
@@ -75,6 +78,8 @@ export function createVitestTestProjects() {
       server: { strictPort: false },
       test: {
         name: 'chromium-layout',
+        maxWorkers: 1,
+        fileParallelism: false,
         globals: true,
         setupFiles: ['./src/test/layout.setup.ts'],
         include: LAYOUT_TEST_FILES,
@@ -312,7 +317,7 @@ export default defineConfig(async ({ command, mode, isPreview }): Promise<ViteUs
     },
     test: {
       globals: true,
-      maxWorkers: 4,
+      maxWorkers: vitestWorkerCount,
       projects: testProjects,
     },
   }
