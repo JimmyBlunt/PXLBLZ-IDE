@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "fastledVersion": "3.10.4",
+  "upstreamRepository": "FastLED/FastLED",
+  "upstreamCommit": "adedfc40e73fb80f8e930318781036d8fe1dbd9f",
+  "license": "MIT",
+  "licenseFile": "src/engine/fastled/examples/LICENSE.FastLED",
+  "fixtures": [
+    {
+      "name": "Animartrix",
+      "source": "test/fastled/matrix/upstream/Animartrix.ino",
+      "upstreamPath": "examples/Animartrix/Animartrix.ino",
+      "upstreamGitBlob": "1358c7a6035298b8abe2bcf926d048e5eff8362a",
+      "expectedPixels": 4096,
+      "expectedGeometry": "64x64"
+    },
+    {
+      "name": "WasmScreenCoords",
+      "source": "test/fastled/matrix/upstream/WasmScreenCoords.ino",
+      "upstreamPath": "examples/WasmScreenCoords/WasmScreenCoords.ino",
+      "upstreamGitBlob": "f507157fe626989d8a6d476c816e2dd387f9893a",
+      "expectedPixels": 512,
+      "expectedGeometry": "two 256-pixel opposing screen maps"
+    }
+  ]
+}
